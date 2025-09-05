@@ -6,6 +6,15 @@ Une application web pour tracker et monitorer vos positions de lending AAVE à t
 
 ### Avec Docker (Recommandé)
 
+0. **Add ethereum rpc in prod.json**
+```
+"rpcETH": {
+        "url": "here",
+        "name": "Ethereum",
+        "chainId": "1"
+    },
+```
+
 1. **Build et run avec Docker Compose** :
 ```bash
 docker-compose up --build

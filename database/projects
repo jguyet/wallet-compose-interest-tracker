@@ -1,0 +1,44 @@
+[
+  {
+    "id": "USDC",
+    "symbol": "USDC",
+    "decimal": 18,
+    "contracts": {
+      "ETH": {
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+      }
+    },
+    "AAVE": {
+      "ETH": {
+        "token": "0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c",
+        "decimal": 6
+      }
+    }
+  },
+  {
+    "id": "USDT",
+    "symbol": "USDT",
+    "decimal": 18,
+    "contracts": {
+      "ETH": {
+        "token": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+      }
+    },
+    "AAVE": {
+      "ETH": {
+        "token": "0x23878914EFE38d27C4D67Ab83ed1b93A74D4086a",
+        "decimal": 6
+      }
+    }
+  },
+  {
+    "id": "stETH",
+    "symbol": "stETH",
+    "decimal": 18,
+    "contracts": {
+      "ETH": {
+        "token": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84"
+      }
+    }
+  }
+]

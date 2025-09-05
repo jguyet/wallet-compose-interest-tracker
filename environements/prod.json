@@ -1,0 +1,52 @@
+{
+    "rpc": {
+        "url": "https://bsc-dataseed.binance.org",
+        "name": "Binance Smart Chain",
+        "chainId": "56"
+    },
+    "rpcBSC": {
+        "url": "https://bsc.publicnode.com",
+        "name": "Binance Smart Chain",
+        "chainId": "56"
+    },
+    "rpcETH": {
+        "url": "",
+        "name": "Ethereum",
+        "chainId": "1"
+    },
+    "rpcAVAX": {
+        "url": "https://api.avax.network/ext/bc/C/rpc",
+        "name": "Avalanche",
+        "chainId": "43114"
+    },
+    "rpcBASE": {
+        "url": "https://mainnet.base.org",
+        "name": "Base",
+        "chainId": "8453"
+    },
+    "rpcMATIC": {
+        "url": "https://polygon-rpc.com",
+        "name": "Polygon",
+        "chainId": "137"
+    },
+    "rpcGLQ": {
+        "url": "https://glq-dataseed.graphlinq.io",
+        "name": "Graphlinq",
+        "chainId": "614"
+    },
+    "rpcFTM": {
+        "url": "https://rpc.ankr.com/fantom/",
+        "name": "Fantom",
+        "chainId": "250"
+    },
+    "rpcFUSE": {
+        "url": "https://rpc.fuse.io",
+        "name": "Fuse Network",
+        "chainId": "122"
+    },
+    "rpcARB": {
+        "url": "https://arb1.arbitrum.io/rpc",
+        "name": "Arbitrum",
+        "chainId": "42161"
+    }
+}
