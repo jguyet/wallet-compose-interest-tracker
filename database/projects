@@ -40,5 +40,25 @@
         "token": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84"
       }
     }
+  },
+  {
+    "id": "USDe",
+    "symbol": "USDe",
+    "decimal": 18,
+    "contracts": {
+      "ETH": {
+        "token": "0x4c9edd5852cd905f086c759e8383e09bff1e68b3"
+      }
+    }
+  },
+  {
+    "id": "aDAI",
+    "symbol": "aDAI",
+    "decimal": 18,
+    "contracts": {
+      "ETH": {
+        "token": "0x018008bfb33d285247A21d44E50697654f754e63"
+      }
+    }
   }
 ]
