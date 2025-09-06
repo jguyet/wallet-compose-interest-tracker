@@ -225,9 +225,6 @@ app.post('/api/daily-gains', async (req, res) => {
         const ethPriceData = await ethPriceResponse.json();
         const ethPrice = ethPriceData.price;
         
-        let totalDailyGainUSD = 0;
-        const tokenGains = {};
-        
         // Token prices in USD
         const tokenPrices = {
             'USDT': 1,
@@ -236,35 +233,64 @@ app.post('/api/daily-gains', async (req, res) => {
             'ETH': ethPrice
         };
         
+        // Get today's and yesterday's dates
+        const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        
+        // Initialize gains objects
+        let totalTodayGainUSD = 0;
+        let totalYesterdayGainUSD = 0;
+        const todayTokenGains = {};
+        const yesterdayTokenGains = {};
+        
         wallets.forEach(wallet => {
             if (selectedWallets.includes(wallet.address)) {
                 Object.keys(wallet.balances || {}).forEach(token => {
                     const tokenBalances = wallet.balances[token];
                     
                     if (tokenBalances && tokenBalances.length >= 2) {
-                        // Get today's change
-                        const latest = tokenBalances[tokenBalances.length - 1];
-                        const change = latest.change || 0;
-                        
-                        // Convert to USD
                         const priceUSD = tokenPrices[token] || 1;
-                        const changeUSD = change * priceUSD;
                         
-                        if (!tokenGains[token]) {
-                            tokenGains[token] = 0;
+                        // Find today's entry
+                        const todayEntry = tokenBalances.find(entry => entry.date === today);
+                        if (todayEntry && todayEntry.change !== undefined) {
+                            const changeUSD = todayEntry.change * priceUSD;
+                            
+                            if (!todayTokenGains[token]) {
+                                todayTokenGains[token] = 0;
+                            }
+                            todayTokenGains[token] += changeUSD;
+                            totalTodayGainUSD += changeUSD;
                         }
-                        tokenGains[token] += changeUSD;
-                        totalDailyGainUSD += changeUSD;
+                        
+                        // Find yesterday's entry
+                        const yesterdayEntry = tokenBalances.find(entry => entry.date === yesterday);
+                        if (yesterdayEntry && yesterdayEntry.change !== undefined) {
+                            const changeUSD = yesterdayEntry.change * priceUSD;
+                            
+                            if (!yesterdayTokenGains[token]) {
+                                yesterdayTokenGains[token] = 0;
+                            }
+                            yesterdayTokenGains[token] += changeUSD;
+                            totalYesterdayGainUSD += changeUSD;
+                        }
                     }
                 });
             }
         });
         
         res.json({
-            totalDailyGainUSD,
-            tokenGains,
-            ethPrice,
-            date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            today: {
+                totalGainUSD: totalTodayGainUSD,
+                tokenGains: todayTokenGains,
+                date: today
+            },
+            yesterday: {
+                totalGainUSD: totalYesterdayGainUSD,
+                tokenGains: yesterdayTokenGains,
+                date: yesterday
+            },
+            ethPrice
         });
     } catch (error) {
         res.status(500).json({ error: error.message });

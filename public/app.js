@@ -253,25 +253,52 @@ async function loadDailyGains() {
 
 function renderDailyGains(gains) {
     const dailyGains = document.getElementById('dailyGains');
-    const isPositive = gains.totalDailyGainUSD >= 0;
     
-    const totalGainsCard = `
-        <div class="total-gains-card ${isPositive ? '' : 'negative'}">
+    // Today's gains card
+    const isTodayPositive = gains.today.totalGainUSD >= 0;
+    const todayGainsCard = `
+        <div class="total-gains-card ${isTodayPositive ? '' : 'negative'}">
             <div class="total-gains-title">Today's Gains</div>
-            <div class="total-gains-amount">${formatCurrency(gains.totalDailyGainUSD)}</div>
-            <div class="total-gains-date">${gains.date}</div>
+            <div class="total-gains-amount">${formatCurrency(gains.today.totalGainUSD)}</div>
+            <div class="total-gains-date">${gains.today.date}</div>
         </div>
     `;
     
-    const tokenGainsList = Object.keys(gains.tokenGains).length > 0 
-        ? Object.entries(gains.tokenGains).map(([token, amount]) => `
-            <div class="token-gain-item">
-                <span class="token-gain-name">${token}</span>
-                <span class="token-gain-amount ${amount >= 0 ? 'positive' : 'negative'}">
-                    ${formatCurrency(amount)}
-                </span>
-            </div>
-        `).join('')
+    // Yesterday's gains card
+    const isYesterdayPositive = gains.yesterday.totalGainUSD >= 0;
+    const yesterdayGainsCard = `
+        <div class="total-gains-card ${isYesterdayPositive ? '' : 'negative'}">
+            <div class="total-gains-title">Yesterday's Gains</div>
+            <div class="total-gains-amount">${formatCurrency(gains.yesterday.totalGainUSD)}</div>
+            <div class="total-gains-date">${gains.yesterday.date}</div>
+        </div>
+    `;
+    
+    // Combined token gains breakdown
+    const allTokens = new Set([
+        ...Object.keys(gains.today.tokenGains),
+        ...Object.keys(gains.yesterday.tokenGains)
+    ]);
+    
+    const tokenGainsList = allTokens.size > 0 
+        ? Array.from(allTokens).map(token => {
+            const todayAmount = gains.today.tokenGains[token] || 0;
+            const yesterdayAmount = gains.yesterday.tokenGains[token] || 0;
+            
+            return `
+                <div class="token-gain-item">
+                    <span class="token-gain-name">${token}</span>
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                        <span class="token-gain-amount ${todayAmount >= 0 ? 'positive' : 'negative'}" style="font-size: 0.9em;">
+                            Today: ${formatCurrency(todayAmount)}
+                        </span>
+                        <span class="token-gain-amount ${yesterdayAmount >= 0 ? 'positive' : 'negative'}" style="font-size: 0.85em; opacity: 0.7;">
+                            Yesterday: ${formatCurrency(yesterdayAmount)}
+                        </span>
+                    </div>
+                </div>
+            `;
+        }).join('')
         : '<div style="text-align: center; color: #666; padding: 20px;">No gains data available</div>';
     
     const tokenGainsBreakdown = `
@@ -284,7 +311,7 @@ function renderDailyGains(gains) {
         </div>
     `;
     
-    dailyGains.innerHTML = totalGainsCard + tokenGainsBreakdown;
+    dailyGains.innerHTML = todayGainsCard + yesterdayGainsCard + tokenGainsBreakdown;
 }
 
 // Token overview functions
