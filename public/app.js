@@ -68,6 +68,11 @@ function formatCurrency(num) {
     return (num >= 0 ? '+' : '-') + formatted;
 }
 
+function formatAPY(apy) {
+    if (apy === 0 || !isFinite(apy)) return '0.00%';
+    return (apy > 0 ? '+' : '') + apy.toFixed(2) + '%';
+}
+
 function shortenAddress(address) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
@@ -108,6 +113,7 @@ async function loadWallets() {
         renderWallets();
         await loadTokenOverview();
         await loadDailyGains();
+        await loadAPYAnalysis();
     } catch (error) {
         showError('Failed to load wallets', 'walletList');
     }
@@ -214,6 +220,7 @@ function toggleWallet(address) {
     
     loadTokenOverview();
     loadDailyGains();
+    loadAPYAnalysis();
 }
 
 function selectAllWallets() {
@@ -221,6 +228,7 @@ function selectAllWallets() {
     renderWallets();
     loadTokenOverview();
     loadDailyGains();
+    loadAPYAnalysis();
 }
 
 function deselectAllWallets() {
@@ -228,6 +236,7 @@ function deselectAllWallets() {
     renderWallets();
     loadTokenOverview();
     loadDailyGains();
+    loadAPYAnalysis();
 }
 
 // Daily gains functions
@@ -312,6 +321,102 @@ function renderDailyGains(gains) {
     `;
     
     dailyGains.innerHTML = todayGainsCard + yesterdayGainsCard + tokenGainsBreakdown;
+}
+
+// APY Analysis functions
+async function loadAPYAnalysis() {
+    if (selectedWallets.length === 0) {
+        document.getElementById('apyAnalysis').innerHTML = 
+            '<div style="text-align: center; color: #666; padding: 40px;">Select wallets to see APY analysis</div>';
+        return;
+    }
+    
+    try {
+        showLoading('apyAnalysis');
+        const apyData = await apiCall('/api/apy-calculations', {
+            method: 'POST',
+            body: JSON.stringify({ selectedWallets })
+        });
+        
+        renderAPYAnalysis(apyData);
+    } catch (error) {
+        showError('Failed to load APY analysis', 'apyAnalysis');
+    }
+}
+
+function renderAPYAnalysis(data) {
+    const apyAnalysis = document.getElementById('apyAnalysis');
+    
+    // Today's APY card
+    const isTodayPositive = data.apyData.todayAPY >= 0;
+    const todayAPYCard = `
+        <div class="apy-card ${isTodayPositive ? '' : 'negative'}">
+            <div class="apy-title">Today's APY</div>
+            <div class="apy-value">${formatAPY(data.apyData.todayAPY)}</div>
+            <div class="apy-subtitle">Daily Rate</div>
+        </div>
+    `;
+    
+    // Yesterday's APY card
+    const isYesterdayPositive = data.apyData.yesterdayAPY >= 0;
+    const yesterdayAPYCard = `
+        <div class="apy-card ${isYesterdayPositive ? '' : 'negative'}">
+            <div class="apy-title">Yesterday's APY</div>
+            <div class="apy-value">${formatAPY(data.apyData.yesterdayAPY)}</div>
+            <div class="apy-subtitle">Daily Rate</div>
+        </div>
+    `;
+    
+    // Annual APY card
+    const isAnnualPositive = data.apyData.annualAPY >= 0;
+    const annualAPYCard = `
+        <div class="apy-card annual ${isAnnualPositive ? '' : 'negative'}">
+            <div class="apy-title">Estimated Annual APY</div>
+            <div class="apy-value">${formatAPY(data.apyData.annualAPY)}</div>
+            <div class="apy-subtitle">Based on ${data.apyData.daysTracked} days</div>
+        </div>
+    `;
+    
+    // Token APY breakdown
+    const tokenAPYs = data.tokenAPYs;
+    const tokenAPYList = Object.keys(tokenAPYs).length > 0 
+        ? Object.entries(tokenAPYs).map(([token, apyData]) => `
+            <div class="token-apy-item">
+                <div>
+                    <span class="token-apy-name">${token}</span>
+                    <div style="font-size: 0.8em; color: #666; margin-top: 2px;">
+                        ${formatCurrency(apyData.currentBalance)}
+                    </div>
+                </div>
+                <div class="token-apy-values">
+                    <span class="token-apy-value today">
+                        Today: ${formatAPY(apyData.todayAPY)}
+                    </span>
+                    <span class="token-apy-value yesterday">
+                        Yesterday: ${formatAPY(apyData.yesterdayAPY)}
+                    </span>
+                    <span class="token-apy-value annual">
+                        Annual: ${formatAPY(apyData.annualAPY)}
+                    </span>
+                </div>
+            </div>
+        `).join('')
+        : '<div style="text-align: center; color: #666; padding: 20px;">No APY data available</div>';
+    
+    const tokenAPYBreakdown = `
+        <div class="token-apy-breakdown">
+            <div class="token-apy-title">APY Breakdown by Token</div>
+            ${tokenAPYList}
+            <div class="apy-stats">
+                <div><strong>Total Portfolio:</strong> ${formatCurrency(data.totalCurrentBalanceUSD)}</div>
+                <div><strong>Historical Gains:</strong> ${formatCurrency(data.totalHistoricalGainsUSD)}</div>
+                <div><strong>Tracking Since:</strong> ${data.apyData.firstTrackingDate || 'N/A'} (${data.apyData.daysSinceStart} days)</div>
+                <div><strong>ETH Price:</strong> $${formatNumber(data.ethPrice)}</div>
+            </div>
+        </div>
+    `;
+    
+    apyAnalysis.innerHTML = todayAPYCard + yesterdayAPYCard + annualAPYCard + tokenAPYBreakdown;
 }
 
 // Token overview functions

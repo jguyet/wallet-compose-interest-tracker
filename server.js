@@ -297,6 +297,165 @@ app.post('/api/daily-gains', async (req, res) => {
     }
 });
 
+// Get APY calculations for selected wallets
+app.post('/api/apy-calculations', async (req, res) => {
+    try {
+        const { selectedWallets } = req.body;
+        const wallets = await database.collection('wallets').find({}).toArray();
+        
+        // Get ETH price
+        const ethPriceResponse = await fetch(`http://localhost:${PORT}/api/eth-price`);
+        const ethPriceData = await ethPriceResponse.json();
+        const ethPrice = ethPriceData.price;
+        
+        // Token prices in USD
+        const tokenPrices = {
+            'USDT': 1,
+            'USDC': 1,
+            'stETH': ethPrice,
+            'ETH': ethPrice
+        };
+        
+        // Get today's and yesterday's dates
+        const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        
+        let totalCurrentBalance = 0;
+        let totalTodayGain = 0;
+        let totalYesterdayGain = 0;
+        let totalHistoricalGains = 0;
+        let totalDaysTracked = 0;
+        let firstTrackingDate = null;
+        
+        const tokenAPYData = {};
+        
+        wallets.forEach(wallet => {
+            if (selectedWallets.includes(wallet.address)) {
+                Object.keys(wallet.balances || {}).forEach(token => {
+                    const tokenBalances = wallet.balances[token];
+                    
+                    if (tokenBalances && tokenBalances.length > 0) {
+                        const priceUSD = tokenPrices[token] || 1;
+                        
+                        // Get current balance
+                        const latestEntry = tokenBalances[tokenBalances.length - 1];
+                        const currentBalance = latestEntry.balance * priceUSD;
+                        totalCurrentBalance += currentBalance;
+                        
+                        // Initialize token data if not exists
+                        if (!tokenAPYData[token]) {
+                            tokenAPYData[token] = {
+                                currentBalance: 0,
+                                todayGain: 0,
+                                yesterdayGain: 0,
+                                totalGains: 0,
+                                daysTracked: 0,
+                                firstDate: null
+                            };
+                        }
+                        
+                        tokenAPYData[token].currentBalance += currentBalance;
+                        
+                        // Calculate gains for each day and track historical data
+                        tokenBalances.forEach((entry, index) => {
+                            if (entry.change !== undefined && entry.change !== 0) {
+                                const gainUSD = entry.change * priceUSD;
+                                
+                                // Track first date
+                                if (!firstTrackingDate || !tokenAPYData[token].firstDate) {
+                                    const entryDate = new Date(entry.date.split('/').reverse().join('-'));
+                                    if (!firstTrackingDate || entryDate < firstTrackingDate) {
+                                        firstTrackingDate = entryDate;
+                                    }
+                                    if (!tokenAPYData[token].firstDate || entryDate < new Date(tokenAPYData[token].firstDate)) {
+                                        tokenAPYData[token].firstDate = entry.date;
+                                    }
+                                }
+                                
+                                // Today's gain
+                                if (entry.date === today) {
+                                    totalTodayGain += gainUSD;
+                                    tokenAPYData[token].todayGain += gainUSD;
+                                }
+                                
+                                // Yesterday's gain
+                                if (entry.date === yesterday) {
+                                    totalYesterdayGain += gainUSD;
+                                    tokenAPYData[token].yesterdayGain += gainUSD;
+                                }
+                                
+                                // Total historical gains
+                                totalHistoricalGains += gainUSD;
+                                tokenAPYData[token].totalGains += gainUSD;
+                                tokenAPYData[token].daysTracked++;
+                            }
+                        });
+                        
+                        // Count total days tracked
+                        if (tokenBalances.length > 1) {
+                            totalDaysTracked = Math.max(totalDaysTracked, tokenBalances.length - 1);
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Calculate APYs
+        const calculateAPY = (gain, balance, days = 1) => {
+            if (balance <= 0 || days <= 0) return 0;
+            const dailyReturn = gain / balance;
+            return ((1 + dailyReturn) ** 365) - 1;
+        };
+        
+        const todayAPY = calculateAPY(totalTodayGain, totalCurrentBalance, 1) * 100;
+        const yesterdayAPY = calculateAPY(totalYesterdayGain, totalCurrentBalance, 1) * 100;
+        
+        // Annual APY based on historical data
+        let annualAPY = 0;
+        if (totalDaysTracked > 0 && totalCurrentBalance > 0) {
+            const avgDailyGain = totalHistoricalGains / totalDaysTracked;
+            annualAPY = calculateAPY(avgDailyGain, totalCurrentBalance, 1) * 100;
+        }
+        
+        // Calculate token-specific APYs
+        const tokenAPYs = {};
+        Object.keys(tokenAPYData).forEach(token => {
+            const data = tokenAPYData[token];
+            tokenAPYs[token] = {
+                currentBalance: data.currentBalance,
+                todayAPY: calculateAPY(data.todayGain, data.currentBalance, 1) * 100,
+                yesterdayAPY: calculateAPY(data.yesterdayGain, data.currentBalance, 1) * 100,
+                annualAPY: data.daysTracked > 0 ? calculateAPY(data.totalGains / data.daysTracked, data.currentBalance, 1) * 100 : 0,
+                daysTracked: data.daysTracked,
+                firstDate: data.firstDate
+            };
+        });
+        
+        // Calculate days since first tracking
+        const daysSinceStart = firstTrackingDate ? 
+            Math.floor((new Date() - firstTrackingDate) / (1000 * 60 * 60 * 24)) : 0;
+        
+        res.json({
+            totalCurrentBalanceUSD: totalCurrentBalance,
+            totalTodayGainUSD: totalTodayGain,
+            totalYesterdayGainUSD: totalYesterdayGain,
+            totalHistoricalGainsUSD: totalHistoricalGains,
+            apyData: {
+                todayAPY: todayAPY,
+                yesterdayAPY: yesterdayAPY,
+                annualAPY: annualAPY,
+                daysTracked: totalDaysTracked,
+                daysSinceStart: daysSinceStart,
+                firstTrackingDate: firstTrackingDate ? firstTrackingDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null
+            },
+            tokenAPYs: tokenAPYs,
+            ethPrice: ethPrice
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Trigger tracking for a specific wallet
 app.post('/api/track-wallet/:address', async (req, res) => {
     try {
