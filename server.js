@@ -148,6 +148,129 @@ app.post('/api/token-history/:token', async (req, res) => {
     }
 });
 
+app.get('/api/eth-price', async (req, res) => {
+    try {
+        const settings = {
+            app: undefined,
+            environement: environement,
+            database: database,
+            account: undefined,
+            verbose: true
+        };
+        const program = require('./programs/aave-wallet-compose-calculation').init(settings);
+        await program.loadImportantTokensPrices();
+        res.json({ price: program.ETHPrice });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get ETH price
+app.get('/api/eth-price', async (req, res) => {
+    try {
+        const { fileGetContent } = require('./utils/file-get-content.js');
+        
+        // Try multiple sources for ETH price
+        let ethPrice = null;
+        
+        try {
+            // Try CoinGecko first
+            const response = await fileGetContent('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+            const data = JSON.parse(response);
+            ethPrice = data.ethereum?.usd;
+        } catch (error) {
+            console.log('CoinGecko failed, trying alternative...');
+        }
+        
+        if (!ethPrice) {
+            try {
+                // Try CoinMarketCap alternative
+                const response = await fileGetContent('https://api.coinbase.com/v2/exchange-rates?currency=ETH');
+                const data = JSON.parse(response);
+                ethPrice = parseFloat(data.data?.rates?.USD);
+            } catch (error) {
+                console.log('Coinbase failed, trying checkdot...');
+            }
+        }
+        
+        if (!ethPrice) {
+            try {
+                // Try your existing checkdot service
+                const response = await fileGetContent('https://node.checkdot.io/get-project-by-id?id=ethereum');
+                const data = JSON.parse(response);
+                ethPrice = data.price;
+            } catch (error) {
+                console.log('Checkdot failed');
+            }
+        }
+        
+        if (!ethPrice) {
+            throw new Error('Unable to fetch ETH price from any source');
+        }
+        
+        res.json({ price: ethPrice, currency: 'USD' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get daily gains in USD for selected wallets
+app.post('/api/daily-gains', async (req, res) => {
+    try {
+        const { selectedWallets } = req.body;
+        const wallets = await database.collection('wallets').find({}).toArray();
+        
+        // Get ETH price
+        const ethPriceResponse = await fetch(`http://localhost:${PORT}/api/eth-price`);
+        const ethPriceData = await ethPriceResponse.json();
+        const ethPrice = ethPriceData.price;
+        
+        let totalDailyGainUSD = 0;
+        const tokenGains = {};
+        
+        // Token prices in USD
+        const tokenPrices = {
+            'USDT': 1,
+            'USDC': 1,
+            'stETH': ethPrice,
+            'ETH': ethPrice
+        };
+        
+        wallets.forEach(wallet => {
+            if (selectedWallets.includes(wallet.address)) {
+                Object.keys(wallet.balances || {}).forEach(token => {
+                    const tokenBalances = wallet.balances[token];
+                    
+                    if (tokenBalances && tokenBalances.length >= 2) {
+                        // Get today's change
+                        const latest = tokenBalances[tokenBalances.length - 1];
+                        const change = latest.change || 0;
+                        
+                        // Convert to USD
+                        const priceUSD = tokenPrices[token] || 1;
+                        const changeUSD = change * priceUSD;
+                        
+                        if (!tokenGains[token]) {
+                            tokenGains[token] = 0;
+                        }
+                        tokenGains[token] += changeUSD;
+                        totalDailyGainUSD += changeUSD;
+                    }
+                });
+            }
+        });
+        
+        res.json({
+            totalDailyGainUSD,
+            tokenGains,
+            ethPrice,
+            date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Trigger tracking for a specific wallet
 app.post('/api/track-wallet/:address', async (req, res) => {
     try {
@@ -186,6 +309,6 @@ app.listen(PORT, async () => {
         account: undefined,
         verbose: true
     };
-
+    
     await require('./programs/aave-wallet-compose-calculation').init(settings).scheduleAllWallets();
 }); 

@@ -57,6 +57,17 @@ function formatPercentage(num) {
     return (num > 0 ? '+' : '') + num.toFixed(2) + '%';
 }
 
+function formatCurrency(num) {
+    if (num === 0) return '$0.00';
+    const formatted = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(Math.abs(num));
+    return (num >= 0 ? '+' : '-') + formatted;
+}
+
 function shortenAddress(address) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
@@ -96,6 +107,7 @@ async function loadWallets() {
         
         renderWallets();
         await loadTokenOverview();
+        await loadDailyGains();
     } catch (error) {
         showError('Failed to load wallets', 'walletList');
     }
@@ -201,18 +213,78 @@ function toggleWallet(address) {
     }
     
     loadTokenOverview();
+    loadDailyGains();
 }
 
 function selectAllWallets() {
     selectedWallets = wallets.map(w => w.address);
     renderWallets();
     loadTokenOverview();
+    loadDailyGains();
 }
 
 function deselectAllWallets() {
     selectedWallets = [];
     renderWallets();
     loadTokenOverview();
+    loadDailyGains();
+}
+
+// Daily gains functions
+async function loadDailyGains() {
+    if (selectedWallets.length === 0) {
+        document.getElementById('dailyGains').innerHTML = 
+            '<div style="text-align: center; color: #666; padding: 40px;">Select wallets to see daily gains</div>';
+        return;
+    }
+    
+    try {
+        showLoading('dailyGains');
+        const gains = await apiCall('/api/daily-gains', {
+            method: 'POST',
+            body: JSON.stringify({ selectedWallets })
+        });
+        
+        renderDailyGains(gains);
+    } catch (error) {
+        showError('Failed to load daily gains', 'dailyGains');
+    }
+}
+
+function renderDailyGains(gains) {
+    const dailyGains = document.getElementById('dailyGains');
+    const isPositive = gains.totalDailyGainUSD >= 0;
+    
+    const totalGainsCard = `
+        <div class="total-gains-card ${isPositive ? '' : 'negative'}">
+            <div class="total-gains-title">Today's Gains</div>
+            <div class="total-gains-amount">${formatCurrency(gains.totalDailyGainUSD)}</div>
+            <div class="total-gains-date">${gains.date}</div>
+        </div>
+    `;
+    
+    const tokenGainsList = Object.keys(gains.tokenGains).length > 0 
+        ? Object.entries(gains.tokenGains).map(([token, amount]) => `
+            <div class="token-gain-item">
+                <span class="token-gain-name">${token}</span>
+                <span class="token-gain-amount ${amount >= 0 ? 'positive' : 'negative'}">
+                    ${formatCurrency(amount)}
+                </span>
+            </div>
+        `).join('')
+        : '<div style="text-align: center; color: #666; padding: 20px;">No gains data available</div>';
+    
+    const tokenGainsBreakdown = `
+        <div class="token-gains-breakdown">
+            <div class="token-gains-title">Breakdown by Token</div>
+            ${tokenGainsList}
+            <div class="eth-price">
+                ETH Price: $${formatNumber(gains.ethPrice)}
+            </div>
+        </div>
+    `;
+    
+    dailyGains.innerHTML = totalGainsCard + tokenGainsBreakdown;
 }
 
 // Token overview functions
