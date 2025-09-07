@@ -7,11 +7,16 @@
       "ETH": {
         "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
       }
-    },
-    "AAVE": {
+    }
+  },
+  {
+    "id": "stETH",
+    "symbol": "aUSDC",
+    "decimal": 6,
+    "contracts": {
       "ETH": {
         "token": "0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c",
-        "decimal": 6
+        "compose": true
       }
     }
   },
@@ -23,11 +28,26 @@
       "ETH": {
         "token": "0xdac17f958d2ee523a2206206994597c13d831ec7"
       }
-    },
-    "AAVE": {
+    }
+  },
+  {
+    "id": "aUSDT",
+    "symbol": "aUSDT",
+    "decimal": 6,
+    "contracts": {
       "ETH": {
         "token": "0x23878914EFE38d27C4D67Ab83ed1b93A74D4086a",
-        "decimal": 6
+        "compose": true
+      }
+    }
+  },
+  {
+    "id": "ETH",
+    "symbol": "ETH",
+    "decimal": 18,
+    "contracts": {
+      "ETH": {
+        "token": "0x0000000000000000000000000000000000000000"
       }
     }
   },
@@ -47,7 +67,8 @@
     "decimal": 18,
     "contracts": {
       "ETH": {
-        "token": "0x4c9edd5852cd905f086c759e8383e09bff1e68b3"
+        "token": "0x4c9edd5852cd905f086c759e8383e09bff1e68b3",
+        "compose": true
       }
     }
   },
@@ -59,11 +80,17 @@
       "ETH": {
         "token": "0x6b175474e89094c44da98b954eedeac495271d0f"
       }
-    },
-    "AAVE": {
+    }
+  },
+  {
+    "id": "aDAI",
+    "symbol": "aDAI",
+    "decimal": 18,
+    "contracts": {
       "ETH": {
         "token": "0x018008bfb33d285247A21d44E50697654f754e63",
-        "decimal": 18
+        "decimal": 18,
+        "compose": true
       }
     }
   }

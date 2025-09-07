@@ -139,6 +139,15 @@ function renderWallets() {
                 <button onclick="trackWallet('${wallet.address}')" class="btn btn-secondary">
                     Update Data
                 </button>
+                <button onclick="preloadHistoricalData('${wallet.address}', 7)" class="btn btn-primary" style="font-size: 0.8em;">
+                    Load 7 Days
+                </button>
+                <button onclick="preloadHistoricalData('${wallet.address}', 365)" class="btn btn-primary" style="font-size: 0.8em; background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);">
+                    Load 1 Year
+                </button>
+                <button onclick="recalculateWallet('${wallet.address}')" class="btn btn-secondary" style="font-size: 0.8em;">
+                    Recalc
+                </button>
                 <button onclick="removeWallet('${wallet.address}')" class="btn btn-danger">
                     Remove
                 </button>
@@ -208,6 +217,61 @@ async function trackWallet(address) {
         await loadWallets();
     } catch (error) {
         showError('Failed to update wallet data');
+    }
+}
+
+async function preloadHistoricalData(address, days = 7) {
+    const timeEstimate = days <= 7 ? 'a few minutes' : days <= 30 ? '5-10 minutes' : 'up to 30 minutes';
+    if (!confirm(`This will load ${days} days of historical data. This may take ${timeEstimate}. Continue?`)) {
+        return;
+    }
+    
+    try {
+        showSuccess(`Loading ${days} days of historical data... This may take a few minutes.`);
+        
+        // Show loading indicator
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = 'Loading...';
+        button.disabled = true;
+        
+        const result = await apiCall(`/api/preload-historical/${address}`, {
+            method: 'POST',
+            body: JSON.stringify({ days: days })
+        });
+        
+        showSuccess(`Historical data loaded successfully! Processed ${result.daysProcessed} days.`);
+        await loadWallets();
+        
+        // Restore button
+        button.textContent = originalText;
+        button.disabled = false;
+        
+    } catch (error) {
+        showError('Failed to load historical data: ' + error.message);
+        
+        // Restore button on error
+        const button = event.target;
+        button.textContent = originalText;
+        button.disabled = false;
+    }
+}
+
+async function recalculateWallet(address) {
+    try {
+        showSuccess('Recalculating wallet changes...');
+        
+        const result = await apiCall(`/api/recalculate-wallet/${address}`, {
+            method: 'POST'
+        });
+        
+        showSuccess(`Recalculated changes for ${result.tokensRecalculated} tokens`);
+        
+        // Reload all views to reflect changes
+        await loadWallets();
+        
+    } catch (error) {
+        showError('Failed to recalculate wallet: ' + error.message);
     }
 }
 
@@ -514,26 +578,75 @@ function renderTokenHistory(history) {
                     <th>Balance</th>
                     <th>Change</th>
                     <th>Change %</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                ${history.map(entry => `
-                    <tr>
-                        <td>${entry.date}</td>
-                        <td>${formatNumber(entry.balance)}</td>
-                        <td class="${entry.change >= 0 ? 'positive' : 'negative'}">
-                            ${entry.change >= 0 ? '+' : ''}${formatNumber(entry.change)}
-                        </td>
-                        <td class="${entry.percentageChange >= 0 ? 'positive' : 'negative'}">
-                            ${formatPercentage(entry.percentageChange)}
-                        </td>
-                    </tr>
-                `).join('')}
+                ${history.map(entry => {
+                    const isExcluded = entry.walletEntries && entry.walletEntries.some(we => we.entry.excluded);
+                    return `
+                        <tr class="${isExcluded ? 'excluded' : ''}">
+                            <td>${entry.date}</td>
+                            <td>${formatNumber(entry.balance)}</td>
+                            <td class="${entry.change >= 0 ? 'positive' : 'negative'}">
+                                ${entry.change >= 0 ? '+' : ''}${formatNumber(entry.change)}
+                            </td>
+                            <td class="${entry.percentageChange >= 0 ? 'positive' : 'negative'}">
+                                ${formatPercentage(entry.percentageChange)}
+                            </td>
+                            <td>
+                                ${isExcluded ? 
+                                    `<button class="exclude-btn include" onclick="toggleDayExclusion('${entry.date}', false)">Include</button>` :
+                                    `<button class="exclude-btn exclude" onclick="toggleDayExclusion('${entry.date}', true)">Exclude</button>`
+                                }
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
             </tbody>
         </table>
     `;
     
     tokenHistory.innerHTML = tableHTML;
+}
+
+// Toggle day exclusion for current token
+async function toggleDayExclusion(date, exclude) {
+    if (!currentToken) {
+        showError('No token selected');
+        return;
+    }
+    
+    try {
+        // For each selected wallet, toggle the exclusion for this date and token
+        const promises = selectedWallets.map(async (walletAddress) => {
+            try {
+                await apiCall(`/api/exclude-day/${walletAddress}/${currentToken}`, {
+                    method: 'POST',
+                    body: JSON.stringify({ date, exclude })
+                });
+            } catch (error) {
+                // Ignore 404 errors (wallet doesn't have this token/date)
+                if (!error.message.includes('404')) {
+                    throw error;
+                }
+            }
+        });
+        
+        await Promise.all(promises);
+        
+        showSuccess(`Day ${date} ${exclude ? 'excluded' : 'included'} for ${currentToken}`);
+        
+        // Reload the token history to reflect changes
+        await loadTokenHistory(currentToken);
+        
+        // Also reload other views to update calculations
+        await loadDailyGains();
+        await loadAPYAnalysis();
+        
+    } catch (error) {
+        showError(`Failed to ${exclude ? 'exclude' : 'include'} day: ` + error.message);
+    }
 }
 
 // Refresh data

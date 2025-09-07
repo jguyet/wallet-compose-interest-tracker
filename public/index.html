@@ -157,7 +157,8 @@
 
         .wallet-actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            flex-wrap: wrap;
         }
 
         .token-overview {
@@ -234,6 +235,38 @@
 
         .history-table tr:hover {
             background: #f5f5f5;
+        }
+
+        .history-table tr.excluded {
+            opacity: 0.5;
+            background: #f8d7da;
+        }
+
+        .history-table tr.excluded:hover {
+            background: #f5c6cb;
+        }
+
+        .exclude-btn {
+            padding: 4px 8px;
+            font-size: 0.7em;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+
+        .exclude-btn.exclude {
+            background: #dc3545;
+            color: white;
+        }
+
+        .exclude-btn.include {
+            background: #28a745;
+            color: white;
+        }
+
+        .exclude-btn:hover {
+            opacity: 0.8;
         }
 
         .positive {

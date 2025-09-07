@@ -109,10 +109,31 @@ const program = {
         );
         return contratToken;
     },
+    getETHBalanceOf: async (ofBalance, chainName) => {
+        return await program['provider' + chainName].getBalance(ofBalance);
+    },
     getTokenBalanceOf: async (tokenAddress, ofBalance, chainName) => {
         try {
             return await program.getTokenContract(tokenAddress, chainName).balanceOf(ofBalance);
         } catch (e) { }
+        return '0';
+    },
+    getTokenBalanceOfAtBlock: async (tokenAddress, ofBalance, chainName, blockNumber) => {
+        try {
+            // Check if the block number is reasonable (not too far in the future or past)
+            const currentBlock = await program['provider' + chainName].getBlockNumber();
+            if (blockNumber > currentBlock || blockNumber < (currentBlock - (400 * 24 * 60 * 60 / 12.5))) {
+                return '0';
+            }
+            
+            const result = await program.getTokenContract(tokenAddress, chainName).balanceOf(ofBalance, { blockTag: blockNumber });
+            return result || '0';
+        } catch (e) { 
+            // Only log non-revert errors to reduce noise
+            if (!e.message.includes('call revert exception') && !e.message.includes('execution reverted')) {
+                console.log(`Error getting balance for ${tokenAddress} at block ${blockNumber}:`, e.message);
+            }
+        }
         return '0';
     },
     loadImportantTokensPrices: async () => {
@@ -213,21 +234,13 @@ const program = {
                         continue ;
                     }
                     let currentContrat = project.contracts[key];
-                    if (currentContrat.token != undefined) {
+                    if (currentContrat.token == "0x0000000000000000000000000000000000000000") {
+                        let balance = await program.getETHBalanceOf(wallet.address, key);
+                        console.log(balance);
+                        totalBalance += Number(ethers.utils.formatEther(balance));
+                    } else if (currentContrat.token != undefined) {
                         let balance = await program.getTokenBalanceOf(currentContrat.token, wallet.address, key);
                         totalBalance += Number(ethers.utils.formatUnits(balance, project.decimal));
-                    }
-                }
-                if (project.AAVE != undefined) {
-                    let chainKeys = Object.keys(project.AAVE);
-                    for (let key of chainKeys) {
-                        let currentInfo = project.AAVE[key];
-                        let currentContrat = project.contracts[key];
-                        if (!['ETH', 'BSC'].includes(key)) {
-                            continue ;
-                        }
-                        let balance = await program.getTokenBalanceOf(currentInfo.token, wallet.address, key);
-                        totalBalance += Number(ethers.utils.formatUnits(balance, currentInfo.decimal));
                     }
                 }
                 console.log(`${wallet.address} ${today} - ${project.symbol}: ${totalBalance}`);
