@@ -2,6 +2,7 @@
 let wallets = [];
 let selectedWallets = [];
 let currentToken = null;
+let compoundChart = null;
 
 // Utility functions
 function showLoading(containerId) {
@@ -114,6 +115,7 @@ async function loadWallets() {
         await loadTokenOverview();
         await loadDailyGains();
         await loadAPYAnalysis();
+        await loadCompoundProjection();
     } catch (error) {
         showError('Failed to load wallets', 'walletList');
     }
@@ -285,6 +287,7 @@ function toggleWallet(address) {
     loadTokenOverview();
     loadDailyGains();
     loadAPYAnalysis();
+    loadCompoundProjection();
 }
 
 function selectAllWallets() {
@@ -293,6 +296,7 @@ function selectAllWallets() {
     loadTokenOverview();
     loadDailyGains();
     loadAPYAnalysis();
+    loadCompoundProjection();
 }
 
 function deselectAllWallets() {
@@ -301,6 +305,7 @@ function deselectAllWallets() {
     loadTokenOverview();
     loadDailyGains();
     loadAPYAnalysis();
+    loadCompoundProjection();
 }
 
 // Daily gains functions
@@ -481,6 +486,217 @@ function renderAPYAnalysis(data) {
     `;
     
     apyAnalysis.innerHTML = todayAPYCard + yesterdayAPYCard + annualAPYCard + tokenAPYBreakdown;
+}
+
+// Compound Interest Projection functions
+async function loadCompoundProjection() {
+    if (selectedWallets.length === 0) {
+        document.getElementById('projectionStats').innerHTML = 
+            '<div style="text-align: center; color: #666; padding: 40px;">Select wallets to see compound interest projection</div>';
+        
+        // Clear chart
+        if (compoundChart) {
+            compoundChart.destroy();
+            compoundChart = null;
+        }
+        return;
+    }
+    
+    try {
+        showLoading('projectionStats');
+        
+        // Get control values
+        const annualCashout = parseFloat(document.getElementById('annualCashout').value) || 0;
+        
+        const projectionData = await apiCall('/api/compound-projections', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                selectedWallets,
+                annualCashout
+            })
+        });
+        
+        renderCompoundProjection(projectionData);
+    } catch (error) {
+        showError('Failed to load compound projection', 'projectionStats');
+    }
+}
+
+function renderCompoundProjection(data) {
+    const projectionStats = document.getElementById('projectionStats');
+    
+    // Render stats
+    const oneYearProjection = data.projections.find(p => p.year === 1);
+    const fiveYearProjection = data.projections.find(p => p.year === 5);
+    
+    const statsHTML = `
+        <div class="projection-stat">
+            <span class="projection-stat-label">Current Balance</span>
+            <span class="projection-stat-value">${formatCurrency(data.currentBalance)}</span>
+        </div>
+        <div class="projection-stat" style="border-left-color: #e74c3c;">
+            <span class="projection-stat-label">Projection APY</span>
+            <span class="projection-stat-value" style="color: #e74c3c;">${formatAPY(data.todayAPY)} (Today's)</span>
+        </div>
+        <div class="projection-stat">
+            <span class="projection-stat-label">Historical APY</span>
+            <span class="projection-stat-value">${formatAPY(data.annualAPY)} (Annual)</span>
+        </div>
+        <div class="projection-stat">
+            <span class="projection-stat-label">Data Points</span>
+            <span class="projection-stat-value">${data.daysTracked} days</span>
+        </div>
+        ${data.annualCashout > 0 ? `
+        <div class="projection-stat">
+            <span class="projection-stat-label">Annual Cashout</span>
+            <span class="projection-stat-value">${formatCurrency(data.annualCashout)}</span>
+        </div>
+        ` : ''}
+        <div class="projection-stat">
+            <span class="projection-stat-label">In 1 Year</span>
+            <span class="projection-stat-value">${formatCurrency(oneYearProjection?.balance || 0)}</span>
+        </div>
+        ${oneYearProjection?.annualGains > 0 ? `
+        <div class="projection-stat" style="border-left-color: #27ae60;">
+            <span class="projection-stat-label">Year 1 Gains</span>
+            <span class="projection-stat-value" style="color: #27ae60;">${formatCurrency(oneYearProjection.annualGains)}</span>
+        </div>
+        ` : ''}
+        <div class="projection-stat">
+            <span class="projection-stat-label">In 5 Years</span>
+            <span class="projection-stat-value">${formatCurrency(fiveYearProjection?.balance || 0)}</span>
+        </div>
+        ${fiveYearProjection?.annualGains > 0 ? `
+        <div class="projection-stat" style="border-left-color: #27ae60;">
+            <span class="projection-stat-label">Year 5 Gains</span>
+            <span class="projection-stat-value" style="color: #27ae60;">${formatCurrency(fiveYearProjection.annualGains)}</span>
+        </div>
+        ` : ''}
+        ${data.annualCashout > 0 && fiveYearProjection?.totalCashout > 0 ? `
+        <div class="projection-stat" style="border-left-color: #f39c12;">
+            <span class="projection-stat-label">5Y Total Cashout</span>
+            <span class="projection-stat-value" style="color: #f39c12;">${formatCurrency(fiveYearProjection.totalCashout)}</span>
+        </div>
+        ` : ''}
+    `;
+    
+    projectionStats.innerHTML = statsHTML;
+    
+    // Render chart
+    renderCompoundChart(data);
+}
+
+function renderCompoundChart(data) {
+    const ctx = document.getElementById('compoundChart').getContext('2d');
+    
+    // Destroy existing chart if it exists
+    if (compoundChart) {
+        compoundChart.destroy();
+    }
+    
+    // Prepare data for Chart.js
+    const labels = data.projections.map(p => `Year ${p.year}`);
+    const balanceData = data.projections.map(p => p.balance);
+    const currentIndex = 0; // Year 0 is always the first point
+    
+    // Create gradient for the line
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, 'rgba(102, 126, 234, 0.8)');
+    gradient.addColorStop(1, 'rgba(102, 126, 234, 0.1)');
+    
+    compoundChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Portfolio Value',
+                data: balanceData,
+                borderColor: '#667eea',
+                backgroundColor: gradient,
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: balanceData.map((_, index) => 
+                    index === currentIndex ? '#e74c3c' : '#667eea'
+                ),
+                pointBorderColor: balanceData.map((_, index) => 
+                    index === currentIndex ? '#c0392b' : '#4c6ef5'
+                ),
+                pointRadius: balanceData.map((_, index) => 
+                    index === currentIndex ? 8 : 4
+                ),
+                pointHoverRadius: balanceData.map((_, index) => 
+                    index === currentIndex ? 10 : 6
+                )
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Portfolio Projection (6 Years)',
+                    font: {
+                        size: 16,
+                        weight: 'bold'
+                    }
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            const projection = data.projections[context.dataIndex];
+                            const balance = formatCurrency(projection.balance);
+                            const annualGains = formatCurrency(projection.annualGains);
+                            const tooltipLines = [
+                                `Balance: ${balance}`,
+                                `Annual Gains: ${annualGains}`,
+                                `Year: ${projection.year}`
+                            ];
+                            
+                            // Add cashout info if applicable
+                            if (projection.totalCashout > 0) {
+                                tooltipLines.push(`Total Cashout: ${formatCurrency(projection.totalCashout)}`);
+                            }
+                            
+                            return tooltipLines;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Years'
+                    }
+                },
+                y: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Portfolio Value (USD)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + formatNumber(value);
+                        }
+                    }
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }
+        }
+    });
 }
 
 // Token overview functions

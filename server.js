@@ -925,6 +925,200 @@ app.get('/api/debug-changes/:address/:token', async (req, res) => {
     }
 });
 
+// Get compound interest projections for selected wallets
+app.post('/api/compound-projections', async (req, res) => {
+    try {
+        const { selectedWallets, period = 30, annualCashout = 0 } = req.body;
+        
+        // Use the same APY calculation logic as /api/apy-calculations but with period filter
+        const apyRequestBody = { selectedWallets };
+        const apyResponse = await fetch(`http://localhost:${PORT}/api/apy-calculations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(apyRequestBody)
+        });
+        const apyData = await apyResponse.json();
+        
+        // Use Today's APY for projections instead of annual APY
+        let todayAPY = apyData.apyData.todayAPY;
+        let totalCurrentBalance = apyData.totalCurrentBalanceUSD;
+        let totalDaysTracked = apyData.apyData.daysTracked;
+        
+        // For projections, we always use Today's APY (no period filtering needed)
+        // The period parameter is just for information display
+        if (false) { // Disable period recalculation since we use Today's APY
+            const wallets = await database.collection('wallets').find({}).toArray();
+            const projects = await database.collection('projects').find({}).toArray();
+            
+            // Get ETH price
+            const ethPriceResponse = await fetch(`http://localhost:${PORT}/api/eth-price`);
+            const ethPriceData = await ethPriceResponse.json();
+            const ethPrice = ethPriceData.price;
+            
+            // Token prices in USD
+            const tokenPrices = {
+                'USDT': 1,
+                'USDC': 1,
+                'stETH': ethPrice,
+                'ETH': ethPrice,
+                'USDe': 1,
+                'DAI': 1
+            };
+            
+            // Helper function to check if a token should be counted (has compose: true)
+            const shouldCountToken = (tokenSymbol) => {
+                const project = projects.find(p => p.symbol === tokenSymbol || p.id === tokenSymbol);
+                if (!project) return false;
+                
+                // Check if token has compose: true in AAVE section
+                if (project.AAVE) {
+                    const aaveTokens = Object.values(project.AAVE);
+                    if (aaveTokens.some(token => token.compose === true)) {
+                        return true;
+                    }
+                }
+                
+                // Check if token has compose: true in contracts section
+                if (project.contracts) {
+                    const contractTokens = Object.values(project.contracts);
+                    if (contractTokens.some(token => token.compose === true)) {
+                        return true;
+                    }
+                }
+                
+                return false;
+            };
+            
+            let periodCurrentBalance = 0;
+            let periodHistoricalGains = 0;
+            let periodDaysTracked = 0;
+            
+            // Calculate for specific period
+            const now = new Date();
+            const periodStartDate = new Date(now.getTime() - (period * 24 * 60 * 60 * 1000));
+            
+            wallets.forEach(wallet => {
+                if (selectedWallets.includes(wallet.address)) {
+                    Object.keys(wallet.balances || {}).forEach(token => {
+                        // Only count tokens with compose: true
+                        if (!shouldCountToken(token)) {
+                            return;
+                        }
+                        
+                        const tokenBalances = wallet.balances[token];
+                        
+                        if (tokenBalances && tokenBalances.length > 0) {
+                            const priceUSD = tokenPrices[token] || 1;
+                            
+                            // Get current balance
+                            const latestEntry = tokenBalances[tokenBalances.length - 1];
+                            const currentBalance = latestEntry.balance * priceUSD;
+                            periodCurrentBalance += currentBalance;
+                            
+                            // Calculate historical gains within the selected period
+                            tokenBalances.forEach((entry) => {
+                                if (entry.change !== undefined && entry.change !== 0 && !entry.excluded) {
+                                    const entryDate = new Date(entry.date.split('/').reverse().join('-'));
+                                    if (entryDate >= periodStartDate) {
+                                        const gainUSD = entry.change * priceUSD;
+                                        periodHistoricalGains += gainUSD;
+                                        periodDaysTracked++;
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+            
+            // Use the same APY calculation function as APY Analysis
+            const calculateAPY = (gain, balance, days = 1) => {
+                if (balance <= 0 || days <= 0) return 0;
+                const dailyReturn = gain / balance;
+                return ((1 + dailyReturn) ** 365) - 1;
+            };
+            
+            // Calculate APY for the period
+            if (periodDaysTracked > 0 && periodCurrentBalance > 0) {
+                const avgDailyGain = periodHistoricalGains / periodDaysTracked;
+                // filteredAPY = calculateAPY(avgDailyGain, periodCurrentBalance, 1) * 100;
+                totalCurrentBalance = periodCurrentBalance;
+                totalDaysTracked = periodDaysTracked;
+            }
+        }
+        
+        // Convert Today's APY to daily rate for projections
+        // Today's APY is annualized, so we need to convert it to daily rate
+        const dailyAPY = Math.pow(1 + (todayAPY / 100), 1/365) - 1;
+        
+        // Generate projections for 6 years (yearly points)
+        const projections = [];
+        const annualAPYDecimal = todayAPY / 100; // Annual APY as decimal
+        
+        // Generate 6 points: Year 0 (current), Year 1, Year 2, Year 3, Year 4, Year 5
+        for (let yearOffset = 0; yearOffset <= 5; yearOffset++) {
+            let projectedBalance = totalCurrentBalance;
+            let previousYearBalance = totalCurrentBalance;
+            
+            // Calculate balance for this year
+            for (let year = 1; year <= yearOffset; year++) {
+                // Apply annual growth
+                projectedBalance = projectedBalance * (1 + annualAPYDecimal);
+                
+                // Subtract annual cashout (only if there's enough balance)
+                if (projectedBalance > annualCashout) {
+                    projectedBalance -= annualCashout;
+                }
+            }
+            
+            // Calculate previous year balance for gains calculation
+            if (yearOffset > 0) {
+                previousYearBalance = totalCurrentBalance;
+                for (let year = 1; year <= yearOffset - 1; year++) {
+                    previousYearBalance = previousYearBalance * (1 + annualAPYDecimal);
+                    if (previousYearBalance > annualCashout) {
+                        previousYearBalance -= annualCashout;
+                    }
+                }
+            }
+            
+            // Calculate annual gains (gains made during this specific year)
+            let annualGains = 0;
+            if (yearOffset === 0) {
+                annualGains = 0; // Current year, no gains yet
+            } else {
+                // Gains = (current year balance + cashout) - previous year balance
+                const balanceBeforeCashout = projectedBalance + (projectedBalance > 0 ? annualCashout : 0);
+                annualGains = balanceBeforeCashout - previousYearBalance;
+            }
+            
+            const date = new Date();
+            date.setFullYear(date.getFullYear() + yearOffset);
+            
+            projections.push({
+                year: yearOffset,
+                date: date.getFullYear().toString(),
+                balance: projectedBalance,
+                annualGains: annualGains, // Gains made during this specific year
+                totalCashout: yearOffset > 0 ? annualCashout * yearOffset : 0
+            });
+        }
+        
+        res.json({
+            currentBalance: totalCurrentBalance,
+            annualAPY: apyData.apyData.annualAPY, // Show annual APY for reference
+            todayAPY: todayAPY, // Show the APY used for projections
+            projections: projections,
+            daysTracked: totalDaysTracked,
+            annualCashout: annualCashout,
+            ethPrice: apyData.ethPrice
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Trigger tracking for a specific wallet
 app.post('/api/track-wallet/:address', async (req, res) => {
     try {
