@@ -571,10 +571,17 @@
                 <div id="walletList" class="wallet-list">
                     <!-- Wallets will be loaded here -->
                 </div>
-                <div style="margin-top: 20px;">
+                <div style="margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                     <button onclick="selectAllWallets()" class="btn btn-secondary">Select All</button>
                     <button onclick="deselectAllWallets()" class="btn btn-secondary">Deselect All</button>
                     <button onclick="refreshData()" class="btn btn-primary">Refresh Data</button>
+                    <div style="border-left: 2px solid #ddd; height: 30px; margin: 0 5px;"></div>
+                    <button onclick="loadAllWalletsHistorical(7)" class="btn btn-primary" style="font-size: 0.9em;">
+                        Load 7 Days All
+                    </button>
+                    <button onclick="loadAllWalletsHistorical(365)" class="btn btn-primary" style="background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); font-size: 0.9em;">
+                        Load 1 Year All
+                    </button>
                 </div>
             </div>
 

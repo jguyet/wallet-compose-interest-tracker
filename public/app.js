@@ -649,6 +649,57 @@ async function toggleDayExclusion(date, exclude) {
     }
 }
 
+// Load historical data for all wallets
+async function loadAllWalletsHistorical(days = 365) {
+    if (wallets.length === 0) {
+        showError('No wallets to process');
+        return;
+    }
+    
+    const timeEstimate = days <= 7 ? 'a few minutes' : days <= 30 ? '10-20 minutes' : 'up to 2 hours';
+    if (!confirm(`This will load ${days} days of historical data for ALL ${wallets.length} wallets. This may take ${timeEstimate}. Continue?`)) {
+        return;
+    }
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    showSuccess(`Starting historical data loading for ${wallets.length} wallets...`);
+    
+    // Process wallets one by one to avoid overwhelming the server
+    for (let i = 0; i < wallets.length; i++) {
+        const wallet = wallets[i];
+        
+        try {
+            showSuccess(`Processing wallet ${i + 1}/${wallets.length}: ${shortenAddress(wallet.address)}...`);
+            
+            const result = await apiCall(`/api/preload-historical/${wallet.address}`, {
+                method: 'POST',
+                body: JSON.stringify({ days: days })
+            });
+            
+            successCount++;
+            showSuccess(`✅ Wallet ${i + 1}/${wallets.length} completed: ${result.daysProcessed} days processed`);
+            
+            // Small delay between wallets to avoid overwhelming the server
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+        } catch (error) {
+            errorCount++;
+            showError(`❌ Wallet ${i + 1}/${wallets.length} failed: ${error.message}`);
+            
+            // Continue with next wallet even if one fails
+            continue;
+        }
+    }
+    
+    // Final summary
+    showSuccess(`Historical loading completed! ✅ ${successCount} successful, ❌ ${errorCount} failed`);
+    
+    // Reload wallets to reflect new data
+    await loadWallets();
+}
+
 // Refresh data
 async function refreshData() {
     showSuccess('Refreshing all data...');
