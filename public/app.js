@@ -528,6 +528,8 @@ function renderCompoundProjection(data) {
     // Render stats
     const oneYearProjection = data.projections.find(p => p.year === 1);
     const fiveYearProjection = data.projections.find(p => p.year === 5);
+    const tenYearProjection = data.projections.find(p => p.year === 10);
+    const twentyYearProjection = data.projections.find(p => p.year === 20);
     
     const statsHTML = `
         <div class="projection-stat">
@@ -556,26 +558,41 @@ function renderCompoundProjection(data) {
             <span class="projection-stat-label">In 1 Year</span>
             <span class="projection-stat-value">${formatCurrency(oneYearProjection?.balance || 0)}</span>
         </div>
-        ${oneYearProjection?.annualGains > 0 ? `
-        <div class="projection-stat" style="border-left-color: #27ae60;">
-            <span class="projection-stat-label">Year 1 Gains</span>
-            <span class="projection-stat-value" style="color: #27ae60;">${formatCurrency(oneYearProjection.annualGains)}</span>
-        </div>
-        ` : ''}
         <div class="projection-stat">
             <span class="projection-stat-label">In 5 Years</span>
             <span class="projection-stat-value">${formatCurrency(fiveYearProjection?.balance || 0)}</span>
         </div>
-        ${fiveYearProjection?.annualGains > 0 ? `
-        <div class="projection-stat" style="border-left-color: #27ae60;">
-            <span class="projection-stat-label">Year 5 Gains</span>
-            <span class="projection-stat-value" style="color: #27ae60;">${formatCurrency(fiveYearProjection.annualGains)}</span>
+        <div class="projection-stat">
+            <span class="projection-stat-label">In 10 Years</span>
+            <span class="projection-stat-value">${formatCurrency(tenYearProjection?.balance || 0)}</span>
+        </div>
+        <div class="projection-stat">
+            <span class="projection-stat-label">In 20 Years</span>
+            <span class="projection-stat-value">${formatCurrency(twentyYearProjection?.balance || 0)}</span>
+        </div>
+        <div class="projection-stat" style="border-left-color: #e74c3c;">
+            <span class="projection-stat-label">Inflation Target (20Y)</span>
+            <span class="projection-stat-value" style="color: #e74c3c;">${formatCurrency(twentyYearProjection?.inflationBaseline || 0)}</span>
+        </div>
+        ${twentyYearProjection ? `
+        <div class="projection-stat" style="border-left-color: ${twentyYearProjection.balance > twentyYearProjection.inflationBaseline ? '#27ae60' : '#e74c3c'};">
+            <span class="projection-stat-label">vs Inflation</span>
+            <span class="projection-stat-value" style="color: ${twentyYearProjection.balance > twentyYearProjection.inflationBaseline ? '#27ae60' : '#e74c3c'};">
+                ${twentyYearProjection.balance > twentyYearProjection.inflationBaseline ? '✅ Beats' : '❌ Below'} 
+                (${formatCurrency(Math.abs(twentyYearProjection.balance - twentyYearProjection.inflationBaseline))})
+            </span>
         </div>
         ` : ''}
-        ${data.annualCashout > 0 && fiveYearProjection?.totalCashout > 0 ? `
+        ${twentyYearProjection?.annualGains > 0 ? `
+        <div class="projection-stat" style="border-left-color: #27ae60;">
+            <span class="projection-stat-label">Year 20 Gains</span>
+            <span class="projection-stat-value" style="color: #27ae60;">${formatCurrency(twentyYearProjection.annualGains)}</span>
+        </div>
+        ` : ''}
+        ${data.annualCashout > 0 && twentyYearProjection?.totalCashout > 0 ? `
         <div class="projection-stat" style="border-left-color: #f39c12;">
-            <span class="projection-stat-label">5Y Total Cashout</span>
-            <span class="projection-stat-value" style="color: #f39c12;">${formatCurrency(fiveYearProjection.totalCashout)}</span>
+            <span class="projection-stat-label">20Y Total Cashout</span>
+            <span class="projection-stat-value" style="color: #f39c12;">${formatCurrency(twentyYearProjection.totalCashout)}</span>
         </div>
         ` : ''}
     `;
@@ -597,6 +614,7 @@ function renderCompoundChart(data) {
     // Prepare data for Chart.js
     const labels = data.projections.map(p => `Year ${p.year}`);
     const balanceData = data.projections.map(p => p.balance);
+    const inflationData = data.projections.map(p => p.inflationBaseline);
     const currentIndex = 0; // Year 0 is always the first point
     
     // Create gradient for the line
@@ -614,7 +632,7 @@ function renderCompoundChart(data) {
                 borderColor: '#667eea',
                 backgroundColor: gradient,
                 borderWidth: 3,
-                fill: true,
+                fill: false,
                 tension: 0.4,
                 pointBackgroundColor: balanceData.map((_, index) => 
                     index === currentIndex ? '#e74c3c' : '#667eea'
@@ -628,6 +646,19 @@ function renderCompoundChart(data) {
                 pointHoverRadius: balanceData.map((_, index) => 
                     index === currentIndex ? 10 : 6
                 )
+            }, {
+                label: 'Inflation Baseline (2%)',
+                data: inflationData,
+                borderColor: '#e74c3c',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.4,
+                borderDash: [5, 5], // Dashed line
+                pointBackgroundColor: '#e74c3c',
+                pointBorderColor: '#c0392b',
+                pointRadius: 3,
+                pointHoverRadius: 5
             }]
         },
         options: {
@@ -636,14 +667,15 @@ function renderCompoundChart(data) {
             plugins: {
                 title: {
                     display: true,
-                    text: 'Portfolio Projection (6 Years)',
+                    text: 'Portfolio Projection (20 Years)',
                     font: {
                         size: 16,
                         weight: 'bold'
                     }
                 },
                 legend: {
-                    display: false
+                    display: true,
+                    position: 'top'
                 },
                 tooltip: {
                     mode: 'index',
@@ -651,20 +683,37 @@ function renderCompoundChart(data) {
                     callbacks: {
                         label: function(context) {
                             const projection = data.projections[context.dataIndex];
-                            const balance = formatCurrency(projection.balance);
-                            const annualGains = formatCurrency(projection.annualGains);
-                            const tooltipLines = [
-                                `Balance: ${balance}`,
-                                `Annual Gains: ${annualGains}`,
-                                `Year: ${projection.year}`
-                            ];
                             
-                            // Add cashout info if applicable
-                            if (projection.totalCashout > 0) {
-                                tooltipLines.push(`Total Cashout: ${formatCurrency(projection.totalCashout)}`);
+                            if (context.datasetIndex === 0) {
+                                // Portfolio Value dataset
+                                const balance = formatCurrency(projection.balance);
+                                const annualGains = formatCurrency(projection.annualGains);
+                                const inflationBaseline = formatCurrency(projection.inflationBaseline);
+                                const beatsInflation = projection.balance > projection.inflationBaseline;
+                                
+                                const tooltipLines = [
+                                    `Portfolio: ${balance}`,
+                                    `Annual Gains: ${annualGains}`,
+                                    `Inflation Target: ${inflationBaseline}`,
+                                    `Status: ${beatsInflation ? '✅ Beats Inflation' : '❌ Below Inflation'}`,
+                                    `Year: ${projection.year}`
+                                ];
+                                
+                                // Add cashout info if applicable
+                                if (projection.totalCashout > 0) {
+                                    tooltipLines.push(`Total Cashout: ${formatCurrency(projection.totalCashout)}`);
+                                }
+                                
+                                return tooltipLines;
+                            } else {
+                                // Inflation baseline dataset
+                                const inflationBaseline = formatCurrency(projection.inflationBaseline);
+                                return [
+                                    `Inflation Target: ${inflationBaseline}`,
+                                    `Year: ${projection.year}`,
+                                    `(2% annual growth)`
+                                ];
                             }
-                            
-                            return tooltipLines;
                         }
                     }
                 }
@@ -675,6 +724,16 @@ function renderCompoundChart(data) {
                     title: {
                         display: true,
                         text: 'Years'
+                    },
+                    ticks: {
+                        maxTicksLimit: 11, // Show every 2 years approximately (0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20)
+                        callback: function(value, index) {
+                            // Show Year 0, every 2 years, and Year 20
+                            if (index === 0 || index === 20 || index % 2 === 0) {
+                                return this.getLabelForValue(value);
+                            }
+                            return '';
+                        }
                     }
                 },
                 y: {

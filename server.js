@@ -1051,12 +1051,13 @@ app.post('/api/compound-projections', async (req, res) => {
         // Today's APY is annualized, so we need to convert it to daily rate
         const dailyAPY = Math.pow(1 + (todayAPY / 100), 1/365) - 1;
         
-        // Generate projections for 6 years (yearly points)
+        // Generate projections for 20 years (yearly points)
         const projections = [];
         const annualAPYDecimal = todayAPY / 100; // Annual APY as decimal
+        const inflationRate = 0.02; // 2% annual inflation
         
-        // Generate 6 points: Year 0 (current), Year 1, Year 2, Year 3, Year 4, Year 5
-        for (let yearOffset = 0; yearOffset <= 5; yearOffset++) {
+        // Generate 21 points: Year 0 (current), Year 1, Year 2, ... Year 20
+        for (let yearOffset = 0; yearOffset <= 20; yearOffset++) {
             let projectedBalance = totalCurrentBalance;
             let previousYearBalance = totalCurrentBalance;
             
@@ -1092,6 +1093,9 @@ app.post('/api/compound-projections', async (req, res) => {
                 annualGains = balanceBeforeCashout - previousYearBalance;
             }
             
+            // Calculate inflation baseline (what you'd need to maintain purchasing power)
+            const inflationBaseline = totalCurrentBalance * Math.pow(1 + inflationRate, yearOffset);
+            
             const date = new Date();
             date.setFullYear(date.getFullYear() + yearOffset);
             
@@ -1100,7 +1104,8 @@ app.post('/api/compound-projections', async (req, res) => {
                 date: date.getFullYear().toString(),
                 balance: projectedBalance,
                 annualGains: annualGains, // Gains made during this specific year
-                totalCashout: yearOffset > 0 ? annualCashout * yearOffset : 0
+                totalCashout: yearOffset > 0 ? annualCashout * yearOffset : 0,
+                inflationBaseline: inflationBaseline // Amount needed to beat inflation
             });
         }
         
