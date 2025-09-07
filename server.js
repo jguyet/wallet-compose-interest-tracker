@@ -18,33 +18,17 @@ function recalculateTokenChanges(tokenBalances) {
         return dateA - dateB;
     });
     
-    let previousNonExcludedEntry = null;
-    
+    // Simple logic: excluded days have change = 0 for calculations
     for (let i = 0; i < tokenBalances.length; i++) {
         const currentEntry = tokenBalances[i];
         
         if (currentEntry.excluded) {
-            // For excluded entries, keep original balance but clear change calculations
-            currentEntry.change = 0;
-            currentEntry.percentageChange = 0;
-            continue;
-        }
-        
-        if (previousNonExcludedEntry === null) {
-            // First non-excluded entry
-            currentEntry.change = currentEntry.balance || 0;
-            currentEntry.percentageChange = 0;
+            // Excluded entries have change = 0 for calculations
+            currentEntry.changeForCalculations = 0;
         } else {
-            // Calculate change from previous non-excluded entry
-            const previousBalance = previousNonExcludedEntry.balance || 0;
-            const currentBalance = currentEntry.balance || 0;
-            
-            currentEntry.change = currentBalance - previousBalance;
-            currentEntry.percentageChange = previousBalance > 0 ? 
-                ((currentEntry.change / previousBalance) * 100) : 0;
+            // Non-excluded entries keep their original change for calculations
+            currentEntry.changeForCalculations = currentEntry.change || 0;
         }
-        
-        previousNonExcludedEntry = currentEntry;
     }
 }
 
@@ -178,11 +162,6 @@ app.post('/api/token-history/:token', async (req, res) => {
                 const tokenBalances = wallet.balances?.[token] || [];
                 
                 tokenBalances.forEach(entry => {
-                    // Skip excluded entries
-                    if (entry.excluded) {
-                        return;
-                    }
-                    
                     const date = entry.date;
                     if (!aggregatedHistory[date]) {
                         aggregatedHistory[date] = {
@@ -190,16 +169,28 @@ app.post('/api/token-history/:token', async (req, res) => {
                             balance: 0,
                             change: 0,
                             percentageChange: 0,
-                            walletEntries: []
+                            walletEntries: [],
+                            hasExcluded: false
                         };
                     }
                     
-                    aggregatedHistory[date].balance += entry.balance || 0;
-                    aggregatedHistory[date].change += entry.change || 0;
+                    // Always add to walletEntries for UI display
                     aggregatedHistory[date].walletEntries.push({
                         wallet: wallet.address,
                         entry: entry
                     });
+                    
+                                        // Always add balance to totals
+                    aggregatedHistory[date].balance += entry.balance || 0;
+                    
+                    if (entry.excluded) {
+                        // Mark that this date has excluded entries and don't add change
+                        aggregatedHistory[date].hasExcluded = true;
+                        // Change = 0 for excluded days in calculations
+                    } else {
+                        // Add change for non-excluded days
+                        aggregatedHistory[date].change += entry.change || 0;
+                    }
                 });
             }
         });
@@ -363,10 +354,12 @@ app.post('/api/daily-gains', async (req, res) => {
                     if (tokenBalances && tokenBalances.length >= 2) {
                         const priceUSD = tokenPrices[token] || 1;
                         
-                        // Find today's entry (skip if excluded)
+                        // Find today's entry
                         const todayEntry = tokenBalances.find(entry => entry.date === today);
-                        if (todayEntry && todayEntry.change !== undefined && !todayEntry.excluded) {
-                            const changeUSD = todayEntry.change * priceUSD;
+                        if (todayEntry && todayEntry.change !== undefined) {
+                            // Use changeForCalculations (0 for excluded days)
+                            const changeForCalc = todayEntry.excluded ? 0 : (todayEntry.change || 0);
+                            const changeUSD = changeForCalc * priceUSD;
                             
                             if (!todayTokenGains[token]) {
                                 todayTokenGains[token] = 0;
@@ -375,10 +368,12 @@ app.post('/api/daily-gains', async (req, res) => {
                             totalTodayGainUSD += changeUSD;
                         }
                         
-                        // Find yesterday's entry (skip if excluded)
+                        // Find yesterday's entry
                         const yesterdayEntry = tokenBalances.find(entry => entry.date === yesterday);
-                        if (yesterdayEntry && yesterdayEntry.change !== undefined && !yesterdayEntry.excluded) {
-                            const changeUSD = yesterdayEntry.change * priceUSD;
+                        if (yesterdayEntry && yesterdayEntry.change !== undefined) {
+                            // Use changeForCalculations (0 for excluded days)
+                            const changeForCalc = yesterdayEntry.excluded ? 0 : (yesterdayEntry.change || 0);
+                            const changeUSD = changeForCalc * priceUSD;
                             
                             if (!yesterdayTokenGains[token]) {
                                 yesterdayTokenGains[token] = 0;
@@ -500,10 +495,12 @@ app.post('/api/apy-calculations', async (req, res) => {
                         
                         tokenAPYData[token].currentBalance += currentBalance;
                         
-                        // Calculate gains for each day and track historical data (skip excluded entries)
+                        // Calculate gains for each day and track historical data
                         tokenBalances.forEach((entry, index) => {
-                            if (entry.change !== undefined && entry.change !== 0 && !entry.excluded) {
-                                const gainUSD = entry.change * priceUSD;
+                            if (entry.change !== undefined && entry.change !== 0) {
+                                // Use changeForCalculations (0 for excluded days)
+                                const changeForCalc = entry.excluded ? 0 : (entry.change || 0);
+                                const gainUSD = changeForCalc * priceUSD;
                                 
                                 // Track first date
                                 if (!firstTrackingDate || !tokenAPYData[token].firstDate) {
@@ -516,22 +513,29 @@ app.post('/api/apy-calculations', async (req, res) => {
                                     }
                                 }
                                 
-                                // Today's gain
-                                if (entry.date === today) {
-                                    totalTodayGain += gainUSD;
-                                    tokenAPYData[token].todayGain += gainUSD;
+                                // Only count gains if not excluded (gainUSD will be 0 for excluded days)
+                                if (gainUSD !== 0 || !entry.excluded) {
+                                    // Today's gain
+                                    if (entry.date === today) {
+                                        totalTodayGain += gainUSD;
+                                        tokenAPYData[token].todayGain += gainUSD;
+                                    }
+                                    
+                                    // Yesterday's gain
+                                    if (entry.date === yesterday) {
+                                        totalYesterdayGain += gainUSD;
+                                        tokenAPYData[token].yesterdayGain += gainUSD;
+                                    }
+                                    
+                                    // Total historical gains
+                                    totalHistoricalGains += gainUSD;
+                                    tokenAPYData[token].totalGains += gainUSD;
+                                    
+                                    // Only increment days tracked for non-excluded days
+                                    if (!entry.excluded) {
+                                        tokenAPYData[token].daysTracked++;
+                                    }
                                 }
-                                
-                                // Yesterday's gain
-                                if (entry.date === yesterday) {
-                                    totalYesterdayGain += gainUSD;
-                                    tokenAPYData[token].yesterdayGain += gainUSD;
-                                }
-                                
-                                // Total historical gains
-                                totalHistoricalGains += gainUSD;
-                                tokenAPYData[token].totalGains += gainUSD;
-                                tokenAPYData[token].daysTracked++;
                             }
                         });
                         
@@ -864,6 +868,56 @@ app.post('/api/exclude-day/:address/:token', async (req, res) => {
             success: true,
             message: `Day ${date} for ${token} ${exclude ? 'excluded' : 'included'} and changes recalculated`,
             entry: tokenBalances[entryIndex]
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Debug endpoint to test change calculations for a specific token
+app.get('/api/debug-changes/:address/:token', async (req, res) => {
+    try {
+        const { address, token } = req.params;
+        
+        const wallets = await database.collection('wallets').find({}).toArray();
+        const wallet = wallets.find(w => w.address === address);
+        
+        if (!wallet || !wallet.balances || !wallet.balances[token]) {
+            return res.status(404).json({ error: 'Wallet or token not found' });
+        }
+        
+        const tokenBalances = wallet.balances[token];
+        
+        // Create a copy for debugging without modifying original
+        const debugBalances = JSON.parse(JSON.stringify(tokenBalances));
+        
+        // Show before recalculation
+        const before = debugBalances.map(entry => ({
+            date: entry.date,
+            balance: entry.balance,
+            change: entry.change,
+            percentageChange: entry.percentageChange,
+            excluded: entry.excluded || false
+        }));
+        
+        // Recalculate
+        recalculateTokenChanges(debugBalances);
+        
+        // Show after recalculation
+        const after = debugBalances.map(entry => ({
+            date: entry.date,
+            balance: entry.balance,
+            change: entry.change,
+            percentageChange: entry.percentageChange,
+            excluded: entry.excluded || false
+        }));
+        
+        res.json({
+            token,
+            before,
+            after,
+            explanation: "Shows the token balance changes before and after recalculation logic"
         });
         
     } catch (error) {
