@@ -70,7 +70,7 @@ function formatCurrency(num) {
 }
 
 function formatAPY(apy) {
-    if (apy === 0 || !isFinite(apy)) return '0.00%';
+    if (apy === 0 || !isFinite(apy) || apy === null) return '0.00%';
     return (apy > 0 ? '+' : '') + apy.toFixed(2) + '%';
 }
 
@@ -409,6 +409,7 @@ async function loadAPYAnalysis() {
         
         renderAPYAnalysis(apyData);
     } catch (error) {
+        console.log(error);
         showError('Failed to load APY analysis', 'apyAnalysis');
     }
 }

@@ -5,12 +5,13 @@
     "decimal": 18,
     "contracts": {
       "ETH": {
-        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "compose": true
       }
     }
   },
   {
-    "id": "stETH",
+    "id": "aUSDC",
     "symbol": "aUSDC",
     "decimal": 6,
     "contracts": {
@@ -26,7 +27,8 @@
     "decimal": 18,
     "contracts": {
       "ETH": {
-        "token": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+        "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        "compose": true
       }
     }
   },
@@ -47,7 +49,8 @@
     "decimal": 18,
     "contracts": {
       "ETH": {
-        "token": "0x0000000000000000000000000000000000000000"
+        "token": "0x0000000000000000000000000000000000000000",
+        "compose": true
       }
     }
   },
@@ -57,7 +60,8 @@
     "decimal": 18,
     "contracts": {
       "ETH": {
-        "token": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84"
+        "token": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+        "compose": true
       }
     }
   },
@@ -78,7 +82,8 @@
     "decimal": 18,
     "contracts": {
       "ETH": {
-        "token": "0x6b175474e89094c44da98b954eedeac495271d0f"
+        "token": "0x6b175474e89094c44da98b954eedeac495271d0f",
+        "compose": true
       }
     }
   },

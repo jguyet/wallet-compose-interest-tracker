@@ -38,6 +38,165 @@ app.use(express.static('public'));
 
 // Routes API
 
+// Function to preload historical data for a new wallet
+async function preloadNewWalletData(address) {
+    try {
+        const projects = await database.collection('projects').find({}).toArray();
+        
+        const settings = {
+            app: undefined,
+            environement: environement,
+            database: database,
+            account: undefined,
+            verbose: false
+        };
+        
+        const aaveProgram = require('./programs/aave-wallet-compose-calculation').init(settings);
+        
+        const currentBlockNumber = await aaveProgram.providerETH.getBlockNumber();
+        const daysToLoad = 365;
+        const blocksPerDay = Math.floor(24 * 60 * 60 / 12.5);
+        
+        let updatedBalances = {};
+        let newEntriesCount = 0;
+        
+        // Get all possible AAVE tokens from projects
+        const allTokens = new Set();
+        projects.forEach(project => {
+            if (project.AAVE && project.AAVE.ETH) {
+                allTokens.add(project.AAVE.ETH.symbol);
+            }
+            if (project.contracts && project.contracts.ETH) {
+                allTokens.add(project.contracts.ETH.symbol);
+            }
+        });
+        
+        console.log(`📊 Preloading ${daysToLoad} days for new wallet ${address}...`);
+        
+        // Process each day
+        for (let dayOffset = 1; dayOffset <= daysToLoad; dayOffset++) {
+            const targetDate = new Date(Date.now() - (dayOffset * 24 * 60 * 60 * 1000));
+            const dateString = targetDate.toLocaleDateString('fr-FR', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric' 
+            });
+            
+            const blockNumber = currentBlockNumber - (dayOffset * blocksPerDay);
+            
+            if (blockNumber < (currentBlockNumber - (400 * blocksPerDay))) {
+                continue; // Skip very old blocks
+            }
+            
+            // Process each token
+            for (const tokenSymbol of allTokens) {
+                try {
+                    const project = projects.find(p => 
+                        (p.AAVE && p.AAVE.ETH && p.AAVE.ETH.symbol === tokenSymbol) ||
+                        (p.contracts && p.contracts.ETH && p.contracts.ETH.symbol === tokenSymbol) ||
+                        p.symbol === tokenSymbol || p.id === tokenSymbol
+                    );
+                    
+                    if (!project) continue;
+                    
+                    let tokenAddress = null;
+                    let tokenDecimals = 18;
+                    
+                    if (project.AAVE && project.AAVE.ETH) {
+                        tokenAddress = project.AAVE.ETH.address;
+                        tokenDecimals = project.AAVE.ETH.decimal || 18;
+                    } else if (project.contracts && project.contracts.ETH) {
+                        tokenAddress = project.contracts.ETH.address;
+                        tokenDecimals = project.contracts.ETH.decimal || 18;
+                    }
+                    
+                    if (!tokenAddress || tokenAddress === '0x0000000000000000000000000000000000000000') {
+                        continue;
+                    }
+                    
+                    const balance = await aaveProgram.getTokenBalanceOfAtBlock(
+                        tokenAddress, 
+                        address, 
+                        'ETH', 
+                        blockNumber
+                    );
+                    
+                    if (balance && balance !== '0') {
+                        const balanceFormatted = parseFloat(balance) / Math.pow(10, tokenDecimals);
+                        
+                        if (!updatedBalances[tokenSymbol]) {
+                            updatedBalances[tokenSymbol] = [];
+                        }
+                        
+                        updatedBalances[tokenSymbol].push({
+                            date: dateString,
+                            balance: balanceFormatted,
+                            change: 0,
+                            percentageChange: 0
+                        });
+                        
+                        newEntriesCount++;
+                    }
+                } catch (error) {
+                    // Silent error handling for new wallet preload
+                    if (!error.message.includes('call revert exception')) {
+                        console.log(`Warning: Error loading ${tokenSymbol} for ${dateString}:`, error.message);
+                    }
+                }
+            }
+            
+            // Progress update every 50 days
+            if (dayOffset % 50 === 0) {
+                console.log(`📅 Processed ${dayOffset}/${daysToLoad} days for wallet ${address}...`);
+            }
+        }
+        
+        // Sort and recalculate changes for all tokens
+        Object.keys(updatedBalances).forEach(token => {
+            if (updatedBalances[token] && updatedBalances[token].length > 0) {
+                // Sort by date
+                updatedBalances[token].sort((a, b) => {
+                    const dateA = new Date(a.date.split('/').reverse().join('-'));
+                    const dateB = new Date(b.date.split('/').reverse().join('-'));
+                    return dateA - dateB;
+                });
+                
+                // Recalculate changes
+                for (let i = 1; i < updatedBalances[token].length; i++) {
+                    const current = updatedBalances[token][i];
+                    const previous = updatedBalances[token][i - 1];
+                    
+                    current.change = current.balance - previous.balance;
+                    current.percentageChange = previous.balance > 0 
+                        ? (current.change / previous.balance) * 100 
+                        : 0;
+                }
+            }
+        });
+        
+        // Update the wallet in database with historical data
+        await database.collection('wallets').updateOne(
+            { id: address },
+            { $set: { balances: updatedBalances } }
+        );
+        
+        console.log(`✅ Successfully preloaded ${newEntriesCount} historical entries for new wallet ${address}`);
+        
+        // Also run current day tracking
+        const projects_current = await database.collection('projects').find({}).toArray();
+        const wallet_obj = { id: address, address: address };
+        
+        console.log(`📊 Running current day tracking for wallet ${address}...`);
+        await aaveProgram.runOneWallet(wallet_obj, projects_current, false);
+        
+        console.log(`✅ Completed full setup for new wallet ${address}`);
+        
+    } catch (error) {
+        console.error(`❌ Error during preload for new wallet ${address}:`, error.message);
+        throw error;
+    }
+}
+
 // Get all wallets
 app.get('/api/wallets', async (req, res) => {
     try {
@@ -56,6 +215,14 @@ app.post('/api/wallets', async (req, res) => {
         if (!address) {
             return res.status(400).json({ error: 'Address is required' });
         }
+        
+        // Check if wallet already exists
+        const wallets = await database.collection('wallets').find({}).toArray();
+        const existingWallet = wallets.find(w => w.address === address);
+        
+        if (existingWallet) {
+            return res.status(400).json({ error: 'Wallet already exists' });
+        }
 
         const newWallet = {
             id: address,
@@ -64,7 +231,20 @@ app.post('/api/wallets', async (req, res) => {
         };
 
         await database.collection('wallets').insert(newWallet);
-        res.json(newWallet);
+        
+        // Immediately preload 365 days of historical data for the new wallet
+        console.log(`🚀 New wallet added: ${address}. Starting automatic 365-day preload...`);
+        
+        // Don't await this - run in background
+        preloadNewWalletData(address).catch(error => {
+            console.error(`❌ Error during automatic preload for wallet ${address}:`, error.message);
+        });
+        
+        res.json({ 
+            success: true, 
+            message: 'Wallet added successfully and historical data is being loaded in the background',
+            wallet: newWallet
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1152,6 +1332,266 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Function to check and fill missing days for all wallets in the last 365 days
+async function checkAndFillMissingDays() {
+    try {
+        console.log('🔍 Checking for missing days in the last 365 days...');
+        
+        const wallets = await database.collection('wallets').find({}).toArray();
+        const projects = await database.collection('projects').find({}).toArray();
+        
+        if (wallets.length === 0) {
+            console.log('No wallets found to check.');
+            return;
+        }
+        
+        const today = new Date();
+        const oneYearAgo = new Date(today.getTime() - (365 * 24 * 60 * 60 * 1000));
+        
+        let totalWalletsToUpdate = 0;
+        let totalDaysToFill = 0;
+        
+        // Check each wallet for missing days
+        for (const wallet of wallets) {
+            if (!wallet.balances) continue;
+            
+            let walletNeedsUpdate = false;
+            let walletMissingDays = 0;
+            
+            // Check each token for missing days
+            Object.keys(wallet.balances).forEach(token => {
+                const tokenBalances = wallet.balances[token];
+                if (!tokenBalances || tokenBalances.length === 0) return;
+                
+                // Get existing dates
+                const existingDates = new Set(tokenBalances.map(entry => entry.date));
+                
+                // Check each day in the last 365 days
+                for (let i = 0; i <= 365; i++) {
+                    const checkDate = new Date(today.getTime() - (i * 24 * 60 * 60 * 1000));
+                    const dateString = checkDate.toLocaleDateString('fr-FR', { 
+                        day: '2-digit', 
+                        month: '2-digit', 
+                        year: 'numeric' 
+                    });
+                    
+                    if (!existingDates.has(dateString)) {
+                        walletNeedsUpdate = true;
+                        walletMissingDays++;
+                        break; // Found missing days, we'll preload the whole year
+                    }
+                }
+            });
+            
+            if (walletNeedsUpdate) {
+                totalWalletsToUpdate++;
+                totalDaysToFill += walletMissingDays;
+                console.log(`📅 Wallet ${wallet.address} has missing days, will preload 365 days...`);
+            }
+        }
+        
+        if (totalWalletsToUpdate > 0) {
+            console.log(`🚀 Found ${totalWalletsToUpdate} wallets with missing data. Starting automatic preload...`);
+            
+            const settings = {
+                app: undefined,
+                environement: environement,
+                database: database,
+                account: undefined,
+                verbose: false // Reduce verbosity for startup
+            };
+            
+            const aaveProgram = require('./programs/aave-wallet-compose-calculation').init(settings);
+            
+            // Preload data for each wallet that needs it
+            for (const wallet of wallets) {
+                if (!wallet.balances) continue;
+                
+                let walletNeedsUpdate = false;
+                
+                // Quick check if wallet needs update
+                Object.keys(wallet.balances).forEach(token => {
+                    const tokenBalances = wallet.balances[token];
+                    if (!tokenBalances || tokenBalances.length === 0) return;
+                    
+                    const existingDates = new Set(tokenBalances.map(entry => entry.date));
+                    
+                    for (let i = 0; i <= 30; i++) { // Check last 30 days for quick assessment
+                        const checkDate = new Date(today.getTime() - (i * 24 * 60 * 60 * 1000));
+                        const dateString = checkDate.toLocaleDateString('fr-FR', { 
+                            day: '2-digit', 
+                            month: '2-digit', 
+                            year: 'numeric' 
+                        });
+                        
+                        if (!existingDates.has(dateString)) {
+                            walletNeedsUpdate = true;
+                            return;
+                        }
+                    }
+                });
+                
+                if (walletNeedsUpdate) {
+                    try {
+                        console.log(`📊 Preloading 365 days for wallet ${wallet.address}...`);
+                        
+                        // Use the existing preload logic
+                        const currentBlockNumber = await aaveProgram.providerETH.getBlockNumber();
+                        const daysToLoad = 365;
+                        const maxDaysBack = 365;
+                        const blocksPerDay = Math.floor(24 * 60 * 60 / 12.5);
+                        
+                        if (daysToLoad > maxDaysBack) {
+                            console.log(`Limiting preload to ${maxDaysBack} days for wallet ${wallet.address}`);
+                            continue;
+                        }
+                        
+                        let updatedBalances = { ...wallet.balances };
+                        let newEntriesCount = 0;
+                        
+                        // Get all tokens for this wallet
+                        const allTokens = new Set();
+                        Object.keys(wallet.balances || {}).forEach(token => {
+                            allTokens.add(token);
+                        });
+                        
+                        // Add AAVE tokens from projects
+                        projects.forEach(project => {
+                            if (project.AAVE && project.AAVE.ETH) {
+                                allTokens.add(project.AAVE.ETH.symbol);
+                            }
+                        });
+                        
+                        // Process each day
+                        for (let dayOffset = 1; dayOffset <= daysToLoad; dayOffset++) {
+                            const targetDate = new Date(Date.now() - (dayOffset * 24 * 60 * 60 * 1000));
+                            const dateString = targetDate.toLocaleDateString('fr-FR', { 
+                                day: '2-digit', 
+                                month: '2-digit', 
+                                year: 'numeric' 
+                            });
+                            
+                            const blockNumber = currentBlockNumber - (dayOffset * blocksPerDay);
+                            
+                            if (blockNumber < (currentBlockNumber - (400 * blocksPerDay))) {
+                                continue; // Skip very old blocks
+                            }
+                            
+                            // Process each token
+                            for (const tokenSymbol of allTokens) {
+                                try {
+                                    // Skip if we already have data for this date
+                                    if (updatedBalances[tokenSymbol]) {
+                                        const existingEntry = updatedBalances[tokenSymbol].find(entry => entry.date === dateString);
+                                        if (existingEntry) {
+                                            continue;
+                                        }
+                                    }
+                                    
+                                    const project = projects.find(p => 
+                                        (p.AAVE && p.AAVE.ETH && p.AAVE.ETH.symbol === tokenSymbol) ||
+                                        (p.contracts && p.contracts.ETH && p.contracts.ETH.symbol === tokenSymbol) ||
+                                        p.symbol === tokenSymbol || p.id === tokenSymbol
+                                    );
+                                    
+                                    if (!project) continue;
+                                    
+                                    let tokenAddress = null;
+                                    let tokenDecimals = 18;
+                                    
+                                    if (project.AAVE && project.AAVE.ETH) {
+                                        tokenAddress = project.AAVE.ETH.address;
+                                        tokenDecimals = project.AAVE.ETH.decimal || 18;
+                                    } else if (project.contracts && project.contracts.ETH) {
+                                        tokenAddress = project.contracts.ETH.address;
+                                        tokenDecimals = project.contracts.ETH.decimal || 18;
+                                    }
+                                    
+                                    if (!tokenAddress || tokenAddress === '0x0000000000000000000000000000000000000000') {
+                                        continue;
+                                    }
+                                    
+                                    const balance = await aaveProgram.getTokenBalanceOfAtBlock(
+                                        tokenAddress, 
+                                        wallet.address, 
+                                        'ETH', 
+                                        blockNumber
+                                    );
+                                    
+                                    if (balance && balance !== '0') {
+                                        const balanceFormatted = parseFloat(balance) / Math.pow(10, tokenDecimals);
+                                        
+                                        if (!updatedBalances[tokenSymbol]) {
+                                            updatedBalances[tokenSymbol] = [];
+                                        }
+                                        
+                                        updatedBalances[tokenSymbol].push({
+                                            date: dateString,
+                                            balance: balanceFormatted,
+                                            change: 0,
+                                            percentageChange: 0
+                                        });
+                                        
+                                        newEntriesCount++;
+                                    }
+                                } catch (error) {
+                                    // Silent error handling for startup
+                                    if (!error.message.includes('call revert exception')) {
+                                        console.log(`Warning: Error loading ${tokenSymbol} for ${dateString}:`, error.message);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Sort and recalculate changes for all tokens
+                        Object.keys(updatedBalances).forEach(token => {
+                            if (updatedBalances[token] && updatedBalances[token].length > 0) {
+                                // Sort by date
+                                updatedBalances[token].sort((a, b) => {
+                                    const dateA = new Date(a.date.split('/').reverse().join('-'));
+                                    const dateB = new Date(b.date.split('/').reverse().join('-'));
+                                    return dateA - dateB;
+                                });
+                                
+                                // Recalculate changes
+                                for (let i = 1; i < updatedBalances[token].length; i++) {
+                                    const current = updatedBalances[token][i];
+                                    const previous = updatedBalances[token][i - 1];
+                                    
+                                    current.change = current.balance - previous.balance;
+                                    current.percentageChange = previous.balance > 0 
+                                        ? (current.change / previous.balance) * 100 
+                                        : 0;
+                                }
+                            }
+                        });
+                        
+                        // Update the wallet in database
+                        await database.collection('wallets').updateOne(
+                            { id: wallet.address },
+                            { $set: { balances: updatedBalances } }
+                        );
+                        
+                        if (newEntriesCount > 0) {
+                            console.log(`✅ Added ${newEntriesCount} historical entries for wallet ${wallet.address}`);
+                        }
+                        
+                    } catch (error) {
+                        console.error(`❌ Error preloading data for wallet ${wallet.address}:`, error.message);
+                    }
+                }
+            }
+            
+            console.log(`✅ Completed automatic data preload for ${totalWalletsToUpdate} wallets.`);
+        } else {
+            console.log('✅ All wallets have complete data for the last 365 days.');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error during missing days check:', error.message);
+    }
+}
+
 app.listen(PORT, async () => {
     console.log(`AAVE Tracker server running on http://localhost:${PORT}`);
 
@@ -1163,5 +1603,9 @@ app.listen(PORT, async () => {
         verbose: true
     };
     
+    // Check and fill missing days before starting the scheduler
+    await checkAndFillMissingDays();
+    
+    // Start the regular scheduler
     await require('./programs/aave-wallet-compose-calculation').init(settings).scheduleAllWallets();
 }); 
