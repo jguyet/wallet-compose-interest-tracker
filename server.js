@@ -170,6 +170,12 @@ async function preloadNewWalletData(address) {
                     current.percentageChange = previous.balance > 0 
                         ? (current.change / previous.balance) * 100 
                         : 0;
+                    
+                    // Auto-exclude days with more than 1% change (gain or loss)
+                    if (Math.abs(current.percentageChange) > 1) {
+                        current.excluded = true;
+                        console.log(`📊 Auto-excluded ${token} on ${current.date} (${current.percentageChange.toFixed(2)}% change)`);
+                    }
                 }
             }
         });
@@ -584,6 +590,118 @@ app.post('/api/daily-gains', async (req, res) => {
     }
 });
 
+// Get historical daily gains table for selected wallets
+app.post('/api/daily-gains-table', async (req, res) => {
+    try {
+        const { selectedWallets, days = 30 } = req.body;
+        const wallets = await database.collection('wallets').find({}).toArray();
+        const projects = await database.collection('projects').find({}).toArray();
+        
+        // Get ETH price
+        const ethPriceResponse = await fetch(`http://localhost:${PORT}/api/eth-price`);
+        const ethPriceData = await ethPriceResponse.json();
+        const ethPrice = ethPriceData.price;
+        
+        // Token prices in USD
+        const tokenPrices = {
+            'USDT': 1,
+            'USDC': 1,
+            'stETH': ethPrice,
+            'ETH': ethPrice,
+            'USDe': 1,
+            'DAI': 1
+        };
+        
+        // Helper function to check if a token should be counted (has compose: true)
+        const shouldCountToken = (tokenSymbol) => {
+            const project = projects.find(p => p.symbol === tokenSymbol || p.id === tokenSymbol);
+            if (!project) return false;
+            
+            // Check if token has compose: true in AAVE section
+            if (project.AAVE) {
+                const aaveTokens = Object.values(project.AAVE);
+                if (aaveTokens.some(token => token.compose === true)) {
+                    return true;
+                }
+            }
+            
+            // Check if token has compose: true in contracts section
+            if (project.contracts) {
+                const contractTokens = Object.values(project.contracts);
+                if (contractTokens.some(token => token.compose === true)) {
+                    return true;
+                }
+            }
+            
+            return false;
+        };
+        
+        // Generate list of dates for the last N days
+        const dailyGainsTable = [];
+        
+        for (let dayOffset = 0; dayOffset < days; dayOffset++) {
+            const targetDate = new Date(Date.now() - (dayOffset * 24 * 60 * 60 * 1000));
+            const dateString = targetDate.toLocaleDateString('fr-FR', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric' 
+            });
+            
+            let totalDayGainUSD = 0;
+            const tokenGains = {};
+            
+            // Calculate gains for this specific day across all selected wallets
+            wallets.forEach(wallet => {
+                if (selectedWallets.includes(wallet.address)) {
+                    Object.keys(wallet.balances || {}).forEach(token => {
+                        // Only count tokens with compose: true
+                        if (!shouldCountToken(token)) {
+                            return;
+                        }
+                        
+                        const tokenBalances = wallet.balances[token];
+                        
+                        if (tokenBalances && tokenBalances.length > 0) {
+                            const priceUSD = tokenPrices[token] || 1;
+                            
+                            // Find entry for this specific date
+                            const dayEntry = tokenBalances.find(entry => entry.date === dateString);
+                            if (dayEntry && dayEntry.change !== undefined) {
+                                // Use changeForCalculations (0 for excluded days)
+                                const changeForCalc = dayEntry.excluded ? 0 : (dayEntry.change || 0);
+                                const changeUSD = changeForCalc * priceUSD;
+                                
+                                if (!tokenGains[token]) {
+                                    tokenGains[token] = 0;
+                                }
+                                tokenGains[token] += changeUSD;
+                                totalDayGainUSD += changeUSD;
+                            }
+                        }
+                    });
+                }
+            });
+            
+            dailyGainsTable.push({
+                date: dateString,
+                totalGainUSD: totalDayGainUSD,
+                tokenGains: tokenGains,
+                hasData: Object.keys(tokenGains).length > 0
+            });
+        }
+        
+        res.json({
+            dailyGainsTable: dailyGainsTable,
+            ethPrice: ethPrice,
+            daysRequested: days,
+            walletsCount: selectedWallets.length
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Get APY calculations for selected wallets
 app.post('/api/apy-calculations', async (req, res) => {
     try {
@@ -964,6 +1082,12 @@ app.post('/api/preload-historical/:address', async (req, res) => {
                     block: currentDay.block
                 };
                 
+                // Auto-exclude days with more than 1% change (gain or loss)
+                if (Math.abs(percentageChange) > 1) {
+                    entryData.excluded = true;
+                    console.log(`📊 Auto-excluded ${token} on ${currentDay.date} (${percentageChange.toFixed(2)}% change)`);
+                }
+                
                 if (existingEntryIndex >= 0) {
                     // Update existing entry
                     wallet.balances[token][existingEntryIndex] = entryData;
@@ -1119,14 +1243,14 @@ app.post('/api/compound-projections', async (req, res) => {
         });
         const apyData = await apyResponse.json();
         
-        // Use Today's APY for projections instead of annual APY
-        let todayAPY = apyData.apyData.todayAPY;
+        // Use Yesterday's APY for projections instead of annual APY
+        let yesterdayAPY = apyData.apyData.yesterdayAPY;
         let totalCurrentBalance = apyData.totalCurrentBalanceUSD;
         let totalDaysTracked = apyData.apyData.daysTracked;
         
-        // For projections, we always use Today's APY (no period filtering needed)
+        // For projections, we always use Yesterday's APY (no period filtering needed)
         // The period parameter is just for information display
-        if (false) { // Disable period recalculation since we use Today's APY
+        if (false) { // Disable period recalculation since we use Yesterday's APY
             const wallets = await database.collection('wallets').find({}).toArray();
             const projects = await database.collection('projects').find({}).toArray();
             
@@ -1227,13 +1351,13 @@ app.post('/api/compound-projections', async (req, res) => {
             }
         }
         
-        // Convert Today's APY to daily rate for projections
-        // Today's APY is annualized, so we need to convert it to daily rate
-        const dailyAPY = Math.pow(1 + (todayAPY / 100), 1/365) - 1;
+        // Convert Yesterday's APY to daily rate for projections
+        // Yesterday's APY is annualized, so we need to convert it to daily rate
+        const dailyAPY = Math.pow(1 + (yesterdayAPY / 100), 1/365) - 1;
         
         // Generate projections for 20 years (yearly points)
         const projections = [];
-        const annualAPYDecimal = todayAPY / 100; // Annual APY as decimal
+        const annualAPYDecimal = yesterdayAPY / 100; // Annual APY as decimal
         const inflationRate = 0.02; // 2% annual inflation
         
         // Generate 21 points: Year 0 (current), Year 1, Year 2, ... Year 20
@@ -1292,7 +1416,7 @@ app.post('/api/compound-projections', async (req, res) => {
         res.json({
             currentBalance: totalCurrentBalance,
             annualAPY: apyData.apyData.annualAPY, // Show annual APY for reference
-            todayAPY: todayAPY, // Show the APY used for projections
+            yesterdayAPY: yesterdayAPY, // Show the APY used for projections
             projections: projections,
             daysTracked: totalDaysTracked,
             annualCashout: annualCashout,
@@ -1322,6 +1446,51 @@ app.post('/api/track-wallet/:address', async (req, res) => {
         await require('./programs/aave-wallet-compose-calculation').init(settings).runOneWallet(wallet, projects, true);
         
         res.json({ success: true, message: 'Wallet tracking completed' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Auto-exclude days with more than 1% change for all wallets
+app.post('/api/auto-exclude-outliers', async (req, res) => {
+    try {
+        const wallets = await database.collection('wallets').find({}).toArray();
+        let totalExclusions = 0;
+        
+        for (const wallet of wallets) {
+            if (!wallet.balances) continue;
+            
+            Object.keys(wallet.balances).forEach(token => {
+                const tokenBalances = wallet.balances[token];
+                if (!tokenBalances || tokenBalances.length === 0) return;
+                
+                tokenBalances.forEach(entry => {
+                    if (entry.percentageChange !== undefined && Math.abs(entry.percentageChange) > 1) {
+                        if (!entry.excluded) {
+                            entry.excluded = true;
+                            totalExclusions++;
+                            console.log(`📊 Auto-excluded ${token} on ${entry.date} (${entry.percentageChange.toFixed(2)}% change)`);
+                        }
+                    }
+                });
+                
+                // Recalculate changes after exclusions
+                recalculateTokenChanges(tokenBalances);
+            });
+            
+            // Save updated wallet
+            await database.collection('wallets').updateOne(
+                { id: wallet.address },
+                { $set: { balances: wallet.balances } }
+            );
+        }
+        
+        res.json({
+            success: true,
+            message: `Auto-excluded ${totalExclusions} days with >1% change across all wallets`,
+            exclusions: totalExclusions
+        });
+        
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1562,6 +1731,12 @@ async function checkAndFillMissingDays() {
                                     current.percentageChange = previous.balance > 0 
                                         ? (current.change / previous.balance) * 100 
                                         : 0;
+                                    
+                                    // Auto-exclude days with more than 1% change (gain or loss)
+                                    if (Math.abs(current.percentageChange) > 1) {
+                                        current.excluded = true;
+                                        console.log(`📊 Auto-excluded ${token} on ${current.date} (${current.percentageChange.toFixed(2)}% change)`);
+                                    }
                                 }
                             }
                         });

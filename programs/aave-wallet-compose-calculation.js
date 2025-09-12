@@ -267,13 +267,30 @@ const program = {
                         day.balance = totalBalance;
                         day.percentageChange = percentageChange;
                         day.change = totalBalance - lastDayBalance;
+                        
+                        // Auto-exclude days with more than 1% change (gain or loss)
+                        if (Math.abs(percentageChange) > 1) {
+                            day.excluded = true;
+                            console.log(`📊 Auto-excluded ${project.symbol} on ${today} (${percentageChange.toFixed(2)}% change)`);
+                        } else {
+                            // Remove exclusion if change is now within 1%
+                            day.excluded = false;
+                        }
                     } else {
-                        wallet.balances[project.symbol].push({
+                        const newEntry = {
                             date: today,
                             balance: totalBalance,
                             percentageChange: percentageChange,
                             change: totalBalance - lastDayBalance
-                        });
+                        };
+                        
+                        // Auto-exclude days with more than 1% change (gain or loss)
+                        if (Math.abs(percentageChange) > 1) {
+                            newEntry.excluded = true;
+                            console.log(`📊 Auto-excluded ${project.symbol} on ${today} (${percentageChange.toFixed(2)}% change)`);
+                        }
+                        
+                        wallet.balances[project.symbol].push(newEntry);
                     }
 
                 } else {

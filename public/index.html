@@ -519,6 +519,113 @@
             color: #666;
         }
 
+        .daily-gains-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+
+        .summary-stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .summary-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .summary-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .summary-value.positive {
+            color: #27ae60;
+        }
+
+        .summary-value.negative {
+            color: #e74c3c;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .daily-gains-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .daily-gains-table th {
+            background: #667eea;
+            color: white;
+            padding: 12px 8px;
+            text-align: center;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #5a6fd8;
+            white-space: nowrap;
+        }
+
+        .daily-gains-table td {
+            padding: 10px 8px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+            white-space: nowrap;
+        }
+
+        .daily-gains-table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .daily-gains-table tr.no-data {
+            opacity: 0.5;
+            background: #f8f9fa;
+        }
+
+        .daily-gains-table tr.no-data:hover {
+            background: #e9ecef;
+        }
+
+        .table-footer {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .daily-gains-controls {
+            display: flex;
+            gap: 15px;
+            align-items: end;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
         .projection-controls {
             display: flex;
             gap: 20px;
@@ -696,6 +803,10 @@
                     <button onclick="loadAllWalletsHistorical(365)" class="btn btn-primary" style="background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); font-size: 0.9em;">
                         Load 1 Year All
                     </button>
+                    <div style="border-left: 2px solid #ddd; height: 30px; margin: 0 5px;"></div>
+                    <button onclick="autoExcludeOutliers()" class="btn btn-danger" style="font-size: 0.9em;">
+                        🚫 Auto-Exclude >1%
+                    </button>
                 </div>
             </div>
 
@@ -712,6 +823,35 @@
                 <h2>📊 APY Analysis</h2>
                 <div id="apyAnalysis" class="apy-analysis">
                     <!-- APY analysis will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Daily Gains Table Section -->
+            <div class="section">
+                <h2>📋 Tableau des Gains Journaliers</h2>
+                
+                <!-- Daily Gains Controls -->
+                <div class="daily-gains-controls">
+                    <div class="control-group">
+                        <label for="dailyGainsTableDays">Nombre de jours :</label>
+                        <select id="dailyGainsTableDays" onchange="loadDailyGainsTable()">
+                            <option value="7">7 jours</option>
+                            <option value="14">14 jours</option>
+                            <option value="30" selected>30 jours</option>
+                            <option value="60">60 jours</option>
+                            <option value="90">90 jours</option>
+                            <option value="180">180 jours</option>
+                            <option value="365">365 jours</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <button onclick="loadDailyGainsTable()" class="refresh-btn">🔄 Actualiser le Tableau</button>
+                    </div>
+                </div>
+                
+                <div id="dailyGainsTable">
+                    <!-- Daily gains table will be loaded here -->
                 </div>
             </div>
 
@@ -733,7 +873,7 @@
                         <label for="annualCashout">💰 Annual Cashout (USD):</label>
                         <input type="number" id="annualCashout" value="0" min="0" step="1000" 
                                placeholder="0" onchange="loadCompoundProjection()">
-                        <small style="color: #666; font-size: 12px;">Projection uses Today's APY from APY Analysis</small>
+                        <small style="color: #666; font-size: 12px;">Projection uses Yesterday's APY from APY Analysis</small>
                     </div>
                     
                     <div class="control-group">

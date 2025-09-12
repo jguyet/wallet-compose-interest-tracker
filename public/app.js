@@ -55,11 +55,28 @@ function formatNumber(num) {
 
 function formatPercentage(num) {
     if (num === 0) return '0.00%';
+    
+    // Handle very small percentages that might show in scientific notation
+    if (Math.abs(num) < 0.01 && num !== 0) {
+        const formatted = num.toFixed(6).replace(/\.?0+$/, '');
+        return (num > 0 ? '+' : '') + formatted + '%';
+    }
+    
     return (num > 0 ? '+' : '') + num.toFixed(2) + '%';
 }
 
 function formatCurrency(num) {
     if (num === 0) return '$0.00';
+    
+    // Handle very small amounts that would show in scientific notation
+    if (Math.abs(num) < 0.01 && num !== 0) {
+        const absNum = Math.abs(num);
+        let decimals = 6;
+        if (absNum < 0.000001) decimals = 8;
+        const formatted = absNum.toFixed(decimals).replace(/\.?0+$/, '');
+        return (num >= 0 ? '+' : '-') + '$' + formatted;
+    }
+    
     const formatted = new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
@@ -71,7 +88,72 @@ function formatCurrency(num) {
 
 function formatAPY(apy) {
     if (apy === 0 || !isFinite(apy) || apy === null) return '0.00%';
+    
+    // Handle very small APY values that might show in scientific notation
+    if (Math.abs(apy) < 0.01 && apy !== 0) {
+        const formatted = apy.toFixed(6).replace(/\.?0+$/, '');
+        return (apy > 0 ? '+' : '') + formatted + '%';
+    }
+    
     return (apy > 0 ? '+' : '') + apy.toFixed(2) + '%';
+}
+
+function formatNumber(value) {
+    if (value == null || isNaN(value)) return '0';
+    
+    // Handle very small numbers that would show in scientific notation
+    if (Math.abs(value) < 0.000001 && value !== 0) {
+        return value.toFixed(8).replace(/\.?0+$/, '');
+    }
+    
+    // Handle small decimals
+    if (Math.abs(value) < 0.01 && value !== 0) {
+        return value.toFixed(6).replace(/\.?0+$/, '');
+    }
+    
+    // Handle normal numbers
+    if (Math.abs(value) < 1) {
+        return value.toFixed(4).replace(/\.?0+$/, '');
+    }
+    
+    // Handle larger numbers with appropriate decimal places
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 4
+    }).format(value);
+}
+
+function formatBalance(balance, symbol = '') {
+    if (balance == null || isNaN(balance)) return '0';
+    
+    const formattedNumber = formatNumber(balance);
+    return symbol ? `${formattedNumber} ${symbol}` : formattedNumber;
+}
+
+function formatTokenAmount(amount, symbol = '') {
+    if (amount == null || isNaN(amount)) return '0';
+    
+    // Special handling for ETH and stETH to show more precision
+    if (symbol === 'ETH' || symbol === 'stETH') {
+        if (Math.abs(amount) < 0.000001 && amount !== 0) {
+            const formatted = amount.toFixed(12).replace(/\.?0+$/, '');
+            return symbol ? `${formatted} ${symbol}` : formatted;
+        }
+        if (Math.abs(amount) < 0.01 && amount !== 0) {
+            const formatted = amount.toFixed(8).replace(/\.?0+$/, '');
+            return symbol ? `${formatted} ${symbol}` : formatted;
+        }
+        if (Math.abs(amount) < 1) {
+            const formatted = amount.toFixed(6).replace(/\.?0+$/, '');
+            return symbol ? `${formatted} ${symbol}` : formatted;
+        }
+        const formatted = amount.toFixed(4).replace(/\.?0+$/, '');
+        return symbol ? `${formatted} ${symbol}` : formatted;
+    }
+    
+    // For other tokens, use the standard formatNumber
+    const formattedNumber = formatNumber(amount);
+    return symbol ? `${formattedNumber} ${symbol}` : formattedNumber;
 }
 
 function shortenAddress(address) {
@@ -114,6 +196,7 @@ async function loadWallets() {
         renderWallets();
         await loadTokenOverview();
         await loadDailyGains();
+        await loadDailyGainsTable();
         await loadAPYAnalysis();
         await loadCompoundProjection();
     } catch (error) {
@@ -286,6 +369,7 @@ function toggleWallet(address) {
     
     loadTokenOverview();
     loadDailyGains();
+    loadDailyGainsTable();
     loadAPYAnalysis();
     loadCompoundProjection();
 }
@@ -295,6 +379,7 @@ function selectAllWallets() {
     renderWallets();
     loadTokenOverview();
     loadDailyGains();
+    loadDailyGainsTable();
     loadAPYAnalysis();
     loadCompoundProjection();
 }
@@ -304,6 +389,7 @@ function deselectAllWallets() {
     renderWallets();
     loadTokenOverview();
     loadDailyGains();
+    loadDailyGainsTable();
     loadAPYAnalysis();
     loadCompoundProjection();
 }
@@ -417,16 +503,6 @@ async function loadAPYAnalysis() {
 function renderAPYAnalysis(data) {
     const apyAnalysis = document.getElementById('apyAnalysis');
     
-    // Today's APY card
-    const isTodayPositive = data.apyData.todayAPY >= 0;
-    const todayAPYCard = `
-        <div class="apy-card ${isTodayPositive ? '' : 'negative'}">
-            <div class="apy-title">Today's APY</div>
-            <div class="apy-value">${formatAPY(data.apyData.todayAPY)}</div>
-            <div class="apy-subtitle">Daily Rate</div>
-        </div>
-    `;
-    
     // Yesterday's APY card
     const isYesterdayPositive = data.apyData.yesterdayAPY >= 0;
     const yesterdayAPYCard = `
@@ -434,16 +510,6 @@ function renderAPYAnalysis(data) {
             <div class="apy-title">Yesterday's APY</div>
             <div class="apy-value">${formatAPY(data.apyData.yesterdayAPY)}</div>
             <div class="apy-subtitle">Daily Rate</div>
-        </div>
-    `;
-    
-    // Annual APY card
-    const isAnnualPositive = data.apyData.annualAPY >= 0;
-    const annualAPYCard = `
-        <div class="apy-card annual ${isAnnualPositive ? '' : 'negative'}">
-            <div class="apy-title">Estimated Annual APY</div>
-            <div class="apy-value">${formatAPY(data.apyData.annualAPY)}</div>
-            <div class="apy-subtitle">Based on ${data.apyData.daysTracked} days</div>
         </div>
     `;
     
@@ -459,14 +525,11 @@ function renderAPYAnalysis(data) {
                     </div>
                 </div>
                 <div class="token-apy-values">
-                    <span class="token-apy-value today">
-                        Today: ${formatAPY(apyData.todayAPY)}
-                    </span>
                     <span class="token-apy-value yesterday">
                         Yesterday: ${formatAPY(apyData.yesterdayAPY)}
                     </span>
                     <span class="token-apy-value annual">
-                        Annual: ${formatAPY(apyData.annualAPY)}
+                        Historical: ${formatAPY(apyData.annualAPY)}
                     </span>
                 </div>
             </div>
@@ -486,7 +549,7 @@ function renderAPYAnalysis(data) {
         </div>
     `;
     
-    apyAnalysis.innerHTML = todayAPYCard + yesterdayAPYCard + annualAPYCard + tokenAPYBreakdown;
+    apyAnalysis.innerHTML = yesterdayAPYCard + tokenAPYBreakdown;
 }
 
 // Compound Interest Projection functions
@@ -539,7 +602,7 @@ function renderCompoundProjection(data) {
         </div>
         <div class="projection-stat" style="border-left-color: #e74c3c;">
             <span class="projection-stat-label">Projection APY</span>
-            <span class="projection-stat-value" style="color: #e74c3c;">${formatAPY(data.todayAPY)} (Today's)</span>
+            <span class="projection-stat-value" style="color: #e74c3c;">${formatAPY(data.yesterdayAPY)} (Yesterday's)</span>
         </div>
         <div class="projection-stat">
             <span class="projection-stat-label">Historical APY</span>
@@ -795,7 +858,7 @@ function renderTokenOverview(balances) {
         <div class="token-card ${currentToken === token ? 'selected' : ''}" 
              onclick="selectToken('${token}')">
             <div class="token-name">${token}</div>
-            <div class="token-balance">${formatNumber(balances[token])}</div>
+            <div class="token-balance">${formatTokenAmount(balances[token], token)}</div>
         </div>
     `).join('');
 }
@@ -863,9 +926,9 @@ function renderTokenHistory(history) {
                     return `
                         <tr class="${isExcluded ? 'excluded' : ''}">
                             <td>${entry.date}</td>
-                            <td>${formatNumber(entry.balance)}</td>
+                            <td>${formatTokenAmount(entry.balance, currentToken)}</td>
                             <td class="${entry.change >= 0 ? 'positive' : 'negative'}">
-                                ${entry.change >= 0 ? '+' : ''}${formatNumber(entry.change)}
+                                ${entry.change >= 0 ? '+' : ''}${formatTokenAmount(entry.change, currentToken)}
                             </td>
                             <td class="${entry.percentageChange >= 0 ? 'positive' : 'negative'}">
                                 ${formatPercentage(entry.percentageChange)}
@@ -918,10 +981,38 @@ async function toggleDayExclusion(date, exclude) {
         
         // Also reload other views to update calculations
         await loadDailyGains();
+        await loadDailyGainsTable();
         await loadAPYAnalysis();
         
     } catch (error) {
         showError(`Failed to ${exclude ? 'exclude' : 'include'} day: ` + error.message);
+    }
+}
+
+// Auto-exclude days with more than 1% change for all wallets
+async function autoExcludeOutliers() {
+    if (!confirm('This will automatically exclude all days with more than 1% change across all wallets. This action cannot be undone easily. Continue?')) {
+        return;
+    }
+    
+    try {
+        showMessage('Analyzing and excluding outliers...', 'info');
+        
+        const result = await apiCall('/api/auto-exclude-outliers', {
+            method: 'POST'
+        });
+        
+        showMessage(`✅ ${result.message}`, 'success');
+        
+        // Refresh all data displays
+        await loadTokenOverview();
+        await loadDailyGains();
+        await loadDailyGainsTable();
+        await loadAPYAnalysis();
+        await loadCompoundProjection();
+        
+    } catch (error) {
+        showMessage(`❌ Error: ${error.message}`, 'error');
     }
 }
 
@@ -974,6 +1065,146 @@ async function loadAllWalletsHistorical(days = 365) {
     
     // Reload wallets to reflect new data
     await loadWallets();
+}
+
+// Daily gains table functions
+async function loadDailyGainsTable() {
+    if (selectedWallets.length === 0) {
+        document.getElementById('dailyGainsTable').innerHTML = 
+            '<div style="text-align: center; color: #666; padding: 40px;">Select wallets to see daily gains table</div>';
+        return;
+    }
+    
+    try {
+        showLoading('dailyGainsTable');
+        
+        // Get the number of days from the control (default 30)
+        const days = parseInt(document.getElementById('dailyGainsTableDays')?.value) || 30;
+        
+        const gainsTable = await apiCall('/api/daily-gains-table', {
+            method: 'POST',
+            body: JSON.stringify({ selectedWallets, days })
+        });
+        
+        renderDailyGainsTable(gainsTable);
+    } catch (error) {
+        showError('Failed to load daily gains table', 'dailyGainsTable');
+    }
+}
+
+function renderDailyGainsTable(data) {
+    const dailyGainsTable = document.getElementById('dailyGainsTable');
+    
+    if (!data.dailyGainsTable || data.dailyGainsTable.length === 0) {
+        dailyGainsTable.innerHTML = 
+            '<div style="text-align: center; color: #666; padding: 40px;">No daily gains data available</div>';
+        return;
+    }
+    
+    // Calculate totals
+    let totalGainsUSD = 0;
+    let positiveGainsDays = 0;
+    let negativeGainsDays = 0;
+    
+    data.dailyGainsTable.forEach(day => {
+        if (day.hasData) {
+            totalGainsUSD += day.totalGainUSD;
+            if (day.totalGainUSD > 0) positiveGainsDays++;
+            else if (day.totalGainUSD < 0) negativeGainsDays++;
+        }
+    });
+    
+    // Summary stats
+    const summaryStats = `
+        <div class="daily-gains-summary">
+            <div class="summary-stat">
+                <span class="summary-label">Total des gains (${data.daysRequested} jours)</span>
+                <span class="summary-value ${totalGainsUSD >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainsUSD)}</span>
+            </div>
+            <div class="summary-stat">
+                <span class="summary-label">Jours positifs</span>
+                <span class="summary-value positive">${positiveGainsDays} jours</span>
+            </div>
+            <div class="summary-stat">
+                <span class="summary-label">Jours négatifs</span>
+                <span class="summary-value negative">${negativeGainsDays} jours</span>
+            </div>
+            <div class="summary-stat">
+                <span class="summary-label">Gain moyen/jour</span>
+                <span class="summary-value">${formatCurrency(totalGainsUSD / data.daysRequested)}</span>
+            </div>
+            <div class="summary-stat">
+                <span class="summary-label">Wallets sélectionnés</span>
+                <span class="summary-value">${data.walletsCount}</span>
+            </div>
+        </div>
+    `;
+    
+    // Get all unique tokens from the data
+    const allTokens = new Set();
+    data.dailyGainsTable.forEach(day => {
+        Object.keys(day.tokenGains).forEach(token => allTokens.add(token));
+    });
+    const tokensList = Array.from(allTokens).sort();
+    
+    // Create table headers
+    const tableHeaders = `
+        <thead>
+            <tr>
+                <th style="position: sticky; left: 0; background: #667eea; z-index: 10;">Date</th>
+                <th style="position: sticky; left: 80px; background: #667eea; z-index: 10;">Total USD</th>
+                ${tokensList.map(token => `<th>${token}</th>`).join('')}
+            </tr>
+        </thead>
+    `;
+    
+    // Create table rows
+    const tableRows = data.dailyGainsTable.map(day => {
+        const isPositive = day.totalGainUSD >= 0;
+        const hasData = day.hasData;
+        
+        return `
+            <tr class="${!hasData ? 'no-data' : ''}">
+                <td style="position: sticky; left: 0; background: white; z-index: 5; font-weight: 600;">
+                    ${day.date}
+                </td>
+                <td style="position: sticky; left: 80px; background: white; z-index: 5;" 
+                    class="${hasData ? (isPositive ? 'positive' : 'negative') : ''}">
+                    ${hasData ? formatCurrency(day.totalGainUSD) : '-'}
+                </td>
+                ${tokensList.map(token => {
+                    const tokenGain = day.tokenGains[token] || 0;
+                    const hasTokenData = tokenGain !== 0;
+                    return `
+                        <td class="${hasTokenData ? (tokenGain >= 0 ? 'positive' : 'negative') : ''}">
+                            ${hasTokenData ? formatCurrency(tokenGain) : '-'}
+                        </td>
+                    `;
+                }).join('')}
+            </tr>
+        `;
+    }).join('');
+    
+    const tableHTML = `
+        ${summaryStats}
+        <div class="table-container">
+            <table class="daily-gains-table">
+                ${tableHeaders}
+                <tbody>
+                    ${tableRows}
+                </tbody>
+            </table>
+        </div>
+        <div class="table-footer">
+            <small style="color: #666;">
+                Prix ETH: $${formatNumber(data.ethPrice)} • 
+                Les jours exclus ont des gains de 0$ • 
+                Seuls les tokens avec compose:true sont inclus
+            </small>
+        </div>
+    `;
+    
+    dailyGainsTable.innerHTML = tableHTML;
 }
 
 // Refresh data
